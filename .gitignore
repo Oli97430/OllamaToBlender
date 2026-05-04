@@ -1,0 +1,43 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- Virtualenvs ------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --- PyInstaller ------------------------------------------------------------
+build/
+dist/
+*.manifest
+*.spec.bak
+
+# --- Editors / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs / runtime data ----------------------------------------------------
+*.log
+.cache/
+.pytest_cache/
+
+# --- Local user data --------------------------------------------------------
+# (these are normally outside the repo at ~/.ollamatoblender/, but just in case
+# someone runs the app with cwd inside the repo and a relative path is set)
+.ollamatoblender/
+
+# --- Pillow / generated previews --------------------------------------------
+_otb_preview.png
+
+# --- Temporary smoke test scaffolding ---------------------------------------
+_smoketest.py
