@@ -8,6 +8,7 @@ from typing import Callable
 
 import customtkinter as ctk
 
+from core.i18n import t
 from core.ollama_client import StreamStats
 
 from . import theme as T
@@ -71,7 +72,7 @@ class ChatTurn(ctk.CTkFrame):
         bubble.pack(side="right", padx=(80, 0))
         if self.image_b64:
             try:
-                InlineImage(bubble, b64=self.image_b64, max_size=(280, 200), caption="attached image").pack(
+                InlineImage(bubble, b64=self.image_b64, max_size=(280, 200), caption=t("turn.attach.caption")).pack(
                     padx=12, pady=(12, 4), anchor="w",
                 )
             except Exception:
@@ -100,7 +101,7 @@ class ChatTurn(ctk.CTkFrame):
         head.pack(fill="x", padx=14, pady=(12, 6))
         self.spinner = ctk.CTkLabel(head, text="●", text_color=T.ACCENT, font=(T.FONT_FAMILY, 14))
         self.spinner.pack(side="left")
-        ctk.CTkLabel(head, text="  Assistant", text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 13, "bold")).pack(side="left")
+        ctk.CTkLabel(head, text=t("turn.assistant"), text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 13, "bold")).pack(side="left")
         ctk.CTkLabel(
             head,
             text=f"  ·  {self.model_name}",
@@ -115,7 +116,7 @@ class ChatTurn(ctk.CTkFrame):
             font=(T.FONT_MONO, 12),
         ).pack(side="left")
 
-        self.status_label = ctk.CTkLabel(head, text="thinking…", text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13))
+        self.status_label = ctk.CTkLabel(head, text=t("turn.thinking"), text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13))
         self.status_label.pack(side="right")
 
         # Streaming raw text (replaced by code view once we have a python block)
@@ -141,7 +142,7 @@ class ChatTurn(ctk.CTkFrame):
 
         self.run_btn = ctk.CTkButton(
             self.actions,
-            text="▶  Run in Blender",
+            text=t("turn.btn.run"),
             command=lambda: self.on_run(self),
             fg_color=T.ACCENT,
             hover_color=T.ACCENT_HOVER,
@@ -152,25 +153,25 @@ class ChatTurn(ctk.CTkFrame):
             state="disabled",
         )
         self.run_btn.pack(side="left")
-        attach_tooltip(self.run_btn, "Send the (possibly edited) code to the Blender addon")
+        attach_tooltip(self.run_btn, t("turn.btn.run.tooltip"))
 
         self.retry_btn = IconButton(
-            self.actions, text="↻  Regenerate", command=lambda: self.on_retry(self),
-            tooltip="Re-ask the model with the same prompt", width=130, height=38,
+            self.actions, text=t("turn.btn.regenerate"), command=lambda: self.on_retry(self),
+            tooltip=t("turn.btn.regenerate.tooltip"), width=130, height=38,
         )
         self.retry_btn.configure(state="disabled")
         self.retry_btn.pack(side="left", padx=(8, 0))
 
         self.save_btn = IconButton(
-            self.actions, text="Save .py", command=self._save_code,
-            tooltip="Save the generated script to a .py file", width=92, height=38,
+            self.actions, text=t("turn.btn.save_py"), command=self._save_code,
+            tooltip=t("turn.btn.save_py.tooltip"), width=92, height=38,
         )
         self.save_btn.configure(state="disabled")
         self.save_btn.pack(side="left", padx=(8, 0))
 
         self.stop_btn = IconButton(
-            self.actions, text="■  Stop", command=self._on_stop_clicked,
-            tooltip="Cancel the streaming response", width=92, height=38,
+            self.actions, text=t("turn.btn.stop"), command=self._on_stop_clicked,
+            tooltip=t("turn.btn.stop.tooltip"), width=92, height=38,
         )
         # Shown only while streaming
         self.stop_btn.configure(state="disabled")
@@ -208,7 +209,7 @@ class ChatTurn(ctk.CTkFrame):
     def start_streaming(self, stats: StreamStats | None = None) -> None:
         self._streaming = True
         self._stats = stats
-        self.status_label.configure(text="streaming…", text_color=T.ACCENT)
+        self.status_label.configure(text=t("turn.streaming"), text_color=T.ACCENT)
         self.stop_btn.configure(state="normal")
         self.stop_btn.pack(side="left", padx=(8, 0), before=self.stats_label)
         self._tick_dot()
@@ -244,10 +245,10 @@ class ChatTurn(ctk.CTkFrame):
         self.stop_btn.pack_forget()
 
         if stats and stats.aborted:
-            self.status_label.configure(text="stopped", text_color=T.WARN)
+            self.status_label.configure(text=t("turn.stopped"), text_color=T.WARN)
             self.spinner.configure(text_color=T.WARN)
         else:
-            self.status_label.configure(text="ready", text_color=T.OK)
+            self.status_label.configure(text=t("turn.ready"), text_color=T.OK)
             self.spinner.configure(text_color=T.OK)
 
         if code and code.strip():
@@ -267,7 +268,7 @@ class ChatTurn(ctk.CTkFrame):
     def set_error(self, message: str) -> None:
         self._stop_dot()
         self.stop_btn.pack_forget()
-        self.status_label.configure(text="error", text_color=T.ERR)
+        self.status_label.configure(text=t("turn.error"), text_color=T.ERR)
         self.spinner.configure(text_color=T.ERR)
         self.stream_box.configure(state="normal")
         self.stream_box.delete("1.0", "end")
@@ -307,18 +308,18 @@ class ChatTurn(ctk.CTkFrame):
     # ------------------------------------------------------------------ blender
 
     def set_blender_running(self) -> None:
-        self.run_btn.configure(state="disabled", text="… running")
+        self.run_btn.configure(state="disabled", text=t("turn.btn.run.running"))
         self.result_frame.pack_forget()
 
     def set_blender_result(self, status: str, payload: dict) -> None:
         self.blender_status = status
         self.blender_payload = payload
-        self.run_btn.configure(state="normal", text="▶  Run in Blender")
+        self.run_btn.configure(state="normal", text=t("turn.btn.run"))
         color = {"ok": T.OK, "error": T.ERR, "transport_error": T.ERR}.get(status, T.WARN)
         label = {
-            "ok": "✓  Executed in Blender",
-            "error": "✗  Blender raised an exception",
-            "transport_error": "✗  Cannot reach Blender — is the addon running?",
+            "ok": t("turn.result.ok"),
+            "error": t("turn.result.error"),
+            "transport_error": t("turn.result.transport_error"),
         }.get(status, status)
         self.result_status.configure(text=label, text_color=color)
 
@@ -337,7 +338,7 @@ class ChatTurn(ctk.CTkFrame):
             parts.append("── result ──\n" + repr(result_payload))
         if payload.get("message"):
             parts.append("── error ──\n" + payload["message"])
-        body = "\n\n".join(parts) or "(no output)"
+        body = "\n\n".join(parts) or t("turn.result.empty")
 
         self.result_box.configure(state="normal")
         self.result_box.delete("1.0", "end")
@@ -358,7 +359,7 @@ class ChatTurn(ctk.CTkFrame):
                     self.result_frame,
                     b64=render_b64,
                     max_size=(720, 480),
-                    caption="viewport preview",
+                    caption=t("turn.preview.caption"),
                 )
                 self._render_preview.pack(fill="x", padx=14, pady=(0, 12))
             except Exception:

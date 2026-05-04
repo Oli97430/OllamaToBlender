@@ -21,11 +21,13 @@ from core import (
     ADDON_REMOTE_URL,
     BlenderAddonDir,
     BlenderClient,
+    LANGUAGE_LABELS,
     OllamaClient,
     Settings,
     StreamStats,
     SYSTEM_PROMPT,
     UpdateInfo,
+    available_languages,
     check_for_update,
     find_blender_addon_dirs,
     install_addon,
@@ -36,6 +38,8 @@ from core import (
     pick_system_prompt,
     read_bundled_version,
     save_history,
+    set_language,
+    t,
     trim_history,
     uninstall_addon,
 )
@@ -52,11 +56,14 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 class OllamaToBlenderApp(ctk.CTk):
     APP_TITLE = "OllamaToBlender"
-    APP_VERSION = "1.0.3"
+    APP_VERSION = "1.1.0"
 
     def __init__(self) -> None:
         super().__init__()
         self.settings = Settings.load()
+
+        # Resolve language BEFORE building any UI — every subsequent t() call depends on it
+        set_language(self.settings.language)
 
         ctk.set_appearance_mode(self.settings.appearance_mode)
         ctk.set_default_color_theme("blue")
@@ -114,7 +121,7 @@ class OllamaToBlenderApp(ctk.CTk):
             return
         self.after(0, lambda: Toast(
             self,
-            f"Update available: v{info.latest}  ·  click About",
+            t("header.update.available", version=info.latest),
             kind="info",
             duration_ms=5000,
         ))
@@ -173,7 +180,7 @@ class OllamaToBlenderApp(ctk.CTk):
 
         ctk.CTkLabel(
             bar,
-            text="   ·  Local-LLM bridge for Blender",
+            text=t("app.subtitle"),
             text_color=T.INK_DIM,
             font=(T.FONT_FAMILY, 13),
         ).grid(row=0, column=2, sticky="w")
@@ -182,11 +189,11 @@ class OllamaToBlenderApp(ctk.CTk):
         pills.grid(row=0, column=3, sticky="e")
         self.pill_ollama = StatusPill(pills, "Ollama")
         self.pill_ollama.pack(side="left", padx=(0, 6))
-        attach_tooltip(self.pill_ollama, "Click to refresh status")
+        attach_tooltip(self.pill_ollama, t("pill.ollama.tooltip"))
         self.pill_ollama.bind("<Button-1>", lambda _e: self._refresh_status())
         self.pill_blender = StatusPill(pills, "Blender")
         self.pill_blender.pack(side="left")
-        attach_tooltip(self.pill_blender, "Click to ping the Blender addon")
+        attach_tooltip(self.pill_blender, t("pill.blender.tooltip"))
         self.pill_blender.bind("<Button-1>", lambda _e: self._refresh_status())
 
     def _build_sidebar(self) -> None:
@@ -198,12 +205,12 @@ class OllamaToBlenderApp(ctk.CTk):
         nav.pack(fill="x", padx=10, pady=(14, 10))
 
         items = [
-            ("chat", "Chat", "💬", "Ctrl+1"),
-            ("setup", "Setup", "🧩", "Ctrl+2"),
-            ("models", "Models", "📦", "Ctrl+3"),
-            ("settings", "Settings", "⚙", "Ctrl+,"),
-            ("logs", "Logs", "📜", "Ctrl+4"),
-            ("about", "About", "ⓘ", ""),
+            ("chat", t("sidebar.chat"), "💬", "Ctrl+1"),
+            ("setup", t("sidebar.setup"), "🧩", "Ctrl+2"),
+            ("models", t("sidebar.models"), "📦", "Ctrl+3"),
+            ("settings", t("sidebar.settings"), "⚙", "Ctrl+,"),
+            ("logs", t("sidebar.logs"), "📜", "Ctrl+4"),
+            ("about", t("sidebar.about"), "ⓘ", ""),
         ]
         for key, label, icon, accel in items:
             btn = SidebarButton(nav, text=label, icon=icon, command=lambda k=key: self.show_view(k))
@@ -215,7 +222,7 @@ class OllamaToBlenderApp(ctk.CTk):
         # Footer with model selector
         footer = ctk.CTkFrame(side, fg_color="transparent")
         footer.pack(side="bottom", fill="x", padx=10, pady=(8, 14))
-        ctk.CTkLabel(footer, text="MODEL", text_color=T.INK_DIM, font=(T.FONT_FAMILY, 11, "bold")).pack(anchor="w")
+        ctk.CTkLabel(footer, text=t("sidebar.model_label"), text_color=T.INK_DIM, font=(T.FONT_FAMILY, 11, "bold")).pack(anchor="w")
         self.model_combo = ctk.CTkComboBox(
             footer,
             values=[self.settings.ollama_model],
@@ -232,7 +239,7 @@ class OllamaToBlenderApp(ctk.CTk):
         )
         self.model_combo.set(self.settings.ollama_model)
         self.model_combo.pack(fill="x", pady=(4, 0))
-        attach_tooltip(self.model_combo, "Active Ollama model — change anytime")
+        attach_tooltip(self.model_combo, t("sidebar.model_tooltip"))
 
     # =========================================================== view router
 
@@ -305,7 +312,7 @@ class OllamaToBlenderApp(ctk.CTk):
         self.auto_run_var = ctk.BooleanVar(value=self.settings.auto_execute)
         auto_chk = ctk.CTkCheckBox(
             ctrl,
-            text="Auto-run",
+            text=t("chat.btn.auto_run"),
             variable=self.auto_run_var,
             text_color=T.INK_MUTED,
             fg_color=T.ACCENT,
@@ -315,12 +322,12 @@ class OllamaToBlenderApp(ctk.CTk):
             command=self._save_settings,
         )
         auto_chk.pack(side="left")
-        attach_tooltip(auto_chk, "Run the generated code immediately after streaming ends")
+        attach_tooltip(auto_chk, t("chat.btn.auto_run.tooltip"))
 
         self.auto_fix_var = ctk.BooleanVar(value=self.settings.auto_fix_on_error)
         fix_chk = ctk.CTkCheckBox(
             ctrl,
-            text="Auto-fix",
+            text=t("chat.btn.auto_fix"),
             variable=self.auto_fix_var,
             text_color=T.INK_MUTED,
             fg_color=T.ACCENT,
@@ -330,12 +337,12 @@ class OllamaToBlenderApp(ctk.CTk):
             command=self._save_settings,
         )
         fix_chk.pack(side="left", padx=(12, 0))
-        attach_tooltip(fix_chk, "If Blender returns an error, ask the model to fix it automatically")
+        attach_tooltip(fix_chk, t("chat.btn.auto_fix.tooltip"))
 
         self.render_var = ctk.BooleanVar(value=self.settings.auto_render_preview)
         render_chk = ctk.CTkCheckBox(
             ctrl,
-            text="Preview",
+            text=t("chat.btn.preview"),
             variable=self.render_var,
             text_color=T.INK_MUTED,
             fg_color=T.ACCENT,
@@ -345,10 +352,10 @@ class OllamaToBlenderApp(ctk.CTk):
             command=self._save_settings,
         )
         render_chk.pack(side="left", padx=(12, 0))
-        attach_tooltip(render_chk, "Render a viewport preview after each run and show it inline")
+        attach_tooltip(render_chk, t("chat.btn.preview.tooltip"))
 
         ctk.CTkLabel(
-            ctrl, text="Ctrl+Enter to send", text_color=T.INK_DIM, font=(T.FONT_FAMILY, 12)
+            ctrl, text=t("chat.hint.send"), text_color=T.INK_DIM, font=(T.FONT_FAMILY, 12)
         ).pack(side="left", padx=(16, 0))
 
         self.export_btn = IconButton(
@@ -365,7 +372,7 @@ class OllamaToBlenderApp(ctk.CTk):
 
         self.send_btn = ctk.CTkButton(
             ctrl,
-            text="Send  ⏎",
+            text=t("chat.btn.send"),
             width=130,
             height=36,
             fg_color=T.ACCENT,
@@ -375,11 +382,11 @@ class OllamaToBlenderApp(ctk.CTk):
             command=self._on_send,
         )
         self.send_btn.pack(side="right")
-        attach_tooltip(self.send_btn, "Send (Ctrl+Enter)")
+        attach_tooltip(self.send_btn, t("chat.btn.send.tooltip"))
 
         self.attach_btn = IconButton(
             ctrl, text="📎", command=self._on_attach_image,
-            tooltip="Attach an image (vision-capable models only)", width=40,
+            tooltip=t("chat.btn.attach.tooltip"), width=40,
         )
         self.attach_btn.pack(side="right", padx=(0, 6))
         self._refresh_attach_visibility()
@@ -414,37 +421,25 @@ class OllamaToBlenderApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.empty_state,
-            text="Describe what you want to build in Blender.\nOllama generates the bpy code, the addon runs it.",
+            text=t("chat.empty.subtitle"),
             text_color=T.INK_MUTED,
             font=(T.FONT_FAMILY, 14),
             justify="center",
         ).pack()
 
         suggestions = [
-            # Build / shading — covers materials + lighting + multi-object composition
-            "Build a stylised studio scene: a wood floor, a glass icosphere, and a 3-point lighting rig",
-            # Animation — covers keyframes + procedural motion
-            "Make a 48-frame seamless looping animation of a metallic torus orbiting a sun lamp",
-            # Procedural generation — shows the bpy.data muscle
-            "Generate a procedural low-poly forest: 12 trees with random heights on a 20×20 ground plane",
-            # Inspection — triggers the short query system prompt
-            "List every object in the scene with its type, vertex count, and material names",
-            # Render hook — pairs with the Preview toggle
-            "Set up a soft golden-hour sun, then render a 720p preview from the camera",
-            # Cleanup — uses the data-API path the system prompt now teaches
-            "Wipe the scene, then add a single Suzanne with a brushed-copper Principled BSDF material",
-            # Low-level modeling with bmesh
-            "Use bmesh to build a custom hex-grid floor (8×8 cells, hex radius 0.5) centred at origin",
-            # Camera setup + procedural orbit animation
-            "Add a 35mm camera 8 m from origin and animate a 120-frame turntable around the active object",
-            # Modifier stack composition
-            "Apply Subdivision (viewport level 3), Bevel (width 0.04), then Wireframe to the active mesh",
-            # Physics simulation — rigid body
-            "Drop 20 random-coloured cubes onto a passive ground plane with rigid body physics over 60 frames",
-            # Particle / scatter system
-            "Scatter 200 small icospheres across the surface of the active mesh with a hair particle system",
-            # Filesystem / batch export
-            "Export every visible mesh to a separate .obj file under a new 'export/' folder next to the .blend",
+            t("suggest.studio_scene"),
+            t("suggest.torus_anim"),
+            t("suggest.forest"),
+            t("suggest.list_objects"),
+            t("suggest.golden_hour"),
+            t("suggest.suzanne"),
+            t("suggest.bmesh_hex"),
+            t("suggest.camera_turntable"),
+            t("suggest.modifier_stack"),
+            t("suggest.rigid_body"),
+            t("suggest.particles"),
+            t("suggest.export_obj"),
         ]
         sug_frame = ctk.CTkFrame(self.empty_state, fg_color="transparent")
         sug_frame.pack(pady=24)
@@ -476,7 +471,7 @@ class OllamaToBlenderApp(ctk.CTk):
         self.prompt_entry.delete("1.0", "end")
         self.prompt_entry.insert(
             "1.0",
-            "Describe a Blender task…   (e.g. add a glass sphere on a wood plane)",
+            t("chat.placeholder"),
         )
         self.prompt_entry.configure(text_color=T.INK_DIM)
         self._placeholder_active = True
@@ -574,7 +569,7 @@ class OllamaToBlenderApp(ctk.CTk):
                 self.after(0, self._scroll_to_bottom_smooth)
         except Exception as exc:
             self.after(0, turn.set_error, f"Ollama error: {exc}")
-            self.after(0, lambda: self.send_btn.configure(state="normal", text="Send  ⏎"))
+            self.after(0, lambda: self.send_btn.configure(state="normal", text=t("chat.btn.send")))
             self.after(0, lambda: self._log(f"ollama error: {exc}"))
             self.after(0, self._mark_idle)
             return
@@ -584,7 +579,7 @@ class OllamaToBlenderApp(ctk.CTk):
         if not stats.aborted:
             self._convo_history.append({"role": "assistant", "content": full_text})
         self.after(0, turn.finish_response, full_text, code, stats)
-        self.after(0, lambda: self.send_btn.configure(state="normal", text="Send  ⏎"))
+        self.after(0, lambda: self.send_btn.configure(state="normal", text=t("chat.btn.send")))
         self.after(0, self._mark_idle)
         self.after(0, lambda: self._log(
             f"stream done: {stats.response_tokens} tok in {stats.elapsed_s:.1f}s"
@@ -707,7 +702,7 @@ class OllamaToBlenderApp(ctk.CTk):
 
     def _export_conversation(self) -> None:
         if not self._chat_turns:
-            Toast(self, "Nothing to export", kind="warn")
+            Toast(self, t("toast.nothing_to_export"), kind="warn")
             return
         path = filedialog.asksaveasfilename(
             title="Export conversation",
@@ -718,7 +713,7 @@ class OllamaToBlenderApp(ctk.CTk):
         if not path:
             return
         save_history([t.to_dict() for t in self._chat_turns], Path(path))
-        Toast(self, "Exported", kind="ok")
+        Toast(self, t("toast.exported"), kind="ok")
 
     # =========================================================== setup view
 
@@ -729,16 +724,12 @@ class OllamaToBlenderApp(ctk.CTk):
         self._views["setup"] = view
 
         # ----- header
-        ctk.CTkLabel(view, text="Setup", text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
+        ctk.CTkLabel(view, text=t("setup.title"), text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
             row=0, column=0, sticky="w", padx=4, pady=(0, 6)
         )
         ctk.CTkLabel(
             view,
-            text=(
-                "OllamaToBlender talks to Blender through the blender-mcp-addon "
-                "(a tiny TCP server, port 9876).  Install it once per Blender version, "
-                "then enable it from Edit → Preferences → Add-ons."
-            ),
+            text=t("setup.intro"),
             text_color=T.INK_MUTED,
             font=(T.FONT_FAMILY, 13),
             justify="left",
@@ -760,13 +751,13 @@ class OllamaToBlenderApp(ctk.CTk):
 
         head = ctk.CTkFrame(left, fg_color="transparent")
         head.pack(fill="x", padx=14, pady=(12, 4))
-        ctk.CTkLabel(head, text="Detected Blender installs", text_color=T.INK,
+        ctk.CTkLabel(head, text=t("setup.detected.title"), text_color=T.INK,
                      font=(T.FONT_FAMILY, 15, "bold")).pack(side="left")
-        IconButton(head, text="Refresh", command=self._refresh_addon_dirs, width=84).pack(side="right")
+        IconButton(head, text=t("setup.btn.refresh"), command=self._refresh_addon_dirs, width=84).pack(side="right")
 
         ctk.CTkLabel(
             left,
-            text=f"Bundled addon: v{read_bundled_version() or '?'}",
+            text=t("setup.bundled_version", version=read_bundled_version() or "?"),
             text_color=T.INK_DIM,
             font=(T.FONT_MONO, 12),
         ).pack(anchor="w", padx=14)
@@ -780,7 +771,7 @@ class OllamaToBlenderApp(ctk.CTk):
         # Manual path
         manual = ctk.CTkFrame(left, fg_color="transparent")
         manual.pack(fill="x", padx=14, pady=(0, 12))
-        ctk.CTkLabel(manual, text="Custom path", text_color=T.INK_MUTED,
+        ctk.CTkLabel(manual, text=t("setup.custom_path"), text_color=T.INK_MUTED,
                      font=(T.FONT_FAMILY, 12)).pack(anchor="w")
         manual_row = ctk.CTkFrame(manual, fg_color="transparent")
         manual_row.pack(fill="x", pady=(2, 0))
@@ -804,13 +795,13 @@ class OllamaToBlenderApp(ctk.CTk):
         )
         right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
-        ctk.CTkLabel(right, text="Install source", text_color=T.INK,
+        ctk.CTkLabel(right, text=t("setup.source.title"), text_color=T.INK,
                      font=(T.FONT_FAMILY, 15, "bold")).pack(anchor="w", padx=14, pady=(12, 4))
 
         self._addon_source = ctk.StringVar(value="remote")
         for val, label, tip in [
-            ("remote", "Latest from GitHub", f"GET {ADDON_REMOTE_URL}"),
-            ("bundled", "Bundled (offline)", "Use the .py shipped inside this app"),
+            ("remote", t("setup.source.remote"), f"GET {ADDON_REMOTE_URL}"),
+            ("bundled", t("setup.source.bundled"), t("setup.source.bundled.tooltip")),
         ]:
             rb = ctk.CTkRadioButton(
                 right, text=label, value=val, variable=self._addon_source,
@@ -824,7 +815,7 @@ class OllamaToBlenderApp(ctk.CTk):
 
         self.btn_install = ctk.CTkButton(
             right,
-            text="⬇  Install / Update addon",
+            text=t("setup.btn.install"),
             fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, text_color="#1a1a1a",
             font=(T.FONT_FAMILY, 14, "bold"),
             command=self._on_install_addon, state="disabled",
@@ -832,36 +823,36 @@ class OllamaToBlenderApp(ctk.CTk):
         self.btn_install.pack(fill="x", padx=14, pady=(2, 6))
 
         self.btn_open_dir = IconButton(
-            right, text="📂  Open folder", command=self._on_open_addon_dir,
-            tooltip="Reveal the addons folder in your file explorer",
+            right, text=t("setup.btn.open_folder"), command=self._on_open_addon_dir,
+            tooltip=t("setup.btn.open_folder.tooltip"),
             width=210, height=38,
         )
         self.btn_open_dir.configure(state="disabled")
         self.btn_open_dir.pack(fill="x", padx=14, pady=(0, 4))
 
         self.btn_uninstall = IconButton(
-            right, text="🗑  Uninstall", command=self._on_uninstall_addon,
-            tooltip="Remove the addon from the selected directory",
+            right, text=t("setup.btn.uninstall"), command=self._on_uninstall_addon,
+            tooltip=t("setup.btn.uninstall.tooltip"),
             width=210, height=38,
         )
         self.btn_uninstall.configure(state="disabled")
         self.btn_uninstall.pack(fill="x", padx=14, pady=(0, 12))
 
         self.addon_status_label = ctk.CTkLabel(
-            right, text="Select a directory above.", text_color=T.INK_DIM,
+            right, text=t("setup.status.select"), text_color=T.INK_DIM,
             font=(T.FONT_FAMILY, 13), wraplength=380, justify="left",
         )
         self.addon_status_label.pack(anchor="w", padx=14, pady=(0, 12))
 
         # Next steps
-        ctk.CTkLabel(right, text="After installing", text_color=T.INK,
+        ctk.CTkLabel(right, text=t("setup.next_steps.title"), text_color=T.INK,
                      font=(T.FONT_FAMILY, 15, "bold")).pack(anchor="w", padx=14, pady=(2, 4))
         for step in (
-            "1.  Open Blender",
-            "2.  Edit → Preferences → Add-ons",
-            "3.  Search “MCP Server”, tick the checkbox",
-            "4.  3D Viewport → N-Panel → MCP",
-            "5.  Come back to Chat — both pills should be green",
+            t("setup.next_steps.1"),
+            t("setup.next_steps.2"),
+            t("setup.next_steps.3"),
+            t("setup.next_steps.4"),
+            t("setup.next_steps.5"),
         ):
             ctk.CTkLabel(right, text=step, text_color=T.INK_MUTED,
                          font=(T.FONT_FAMILY, 13), justify="left",
@@ -881,11 +872,7 @@ class OllamaToBlenderApp(ctk.CTk):
         if not self._addon_dirs:
             ctk.CTkLabel(
                 self.addon_dirs_frame,
-                text=(
-                    "No Blender install detected automatically.\n"
-                    "Add a path manually below — typically:\n"
-                    r"   %APPDATA%\Blender Foundation\Blender\<X.Y>\scripts\addons"
-                ),
+                t("setup.no_install"),
                 text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13), justify="left",
             ).pack(pady=20, padx=8, anchor="w")
             self._update_addon_actions()
@@ -919,16 +906,16 @@ class OllamaToBlenderApp(ctk.CTk):
         info.pack(side="left", fill="x", expand=True, pady=8)
         title = f"Blender {d.version}"
         if d.is_installed:
-            title += f"   ·   ✓ installed v{d.installed_version}"
+            title += "   ·   ✓ " + t("setup.installed.tag") + " v" + d.installed_version
         ctk.CTkLabel(info, text=title, text_color=T.INK, font=(T.FONT_FAMILY, 14, "bold")).pack(anchor="w")
         ctk.CTkLabel(info, text=str(d.path), text_color=T.INK_DIM,
                      font=(T.FONT_MONO, 12)).pack(anchor="w")
 
         if d.is_installed:
-            tag = ctk.CTkLabel(row, text="installed", text_color=T.OK,
+            tag = ctk.CTkLabel(row, text=t("setup.installed.tag"), text_color=T.OK,
                                font=(T.FONT_FAMILY, 12, "bold"))
         else:
-            tag = ctk.CTkLabel(row, text="not installed", text_color=T.INK_DIM,
+            tag = ctk.CTkLabel(row, text=t("setup.not_installed.tag"), text_color=T.INK_DIM,
                                font=(T.FONT_FAMILY, 12))
         tag.pack(side="right", padx=12)
 
@@ -947,19 +934,19 @@ class OllamaToBlenderApp(ctk.CTk):
             self.btn_install.configure(state="disabled")
             self.btn_open_dir.configure(state="disabled")
             self.btn_uninstall.configure(state="disabled")
-            self.addon_status_label.configure(text="Select a directory above.", text_color=T.INK_DIM)
+            self.addon_status_label.configure(text=t("setup.status.select"), text_color=T.INK_DIM)
             return
-        self.btn_install.configure(state="normal", text="⟳  Reinstall / update" if d.is_installed else "⬇  Install addon")
+        self.btn_install.configure(state="normal", text=t("setup.btn.reinstall") if d.is_installed else t("setup.btn.install_only"))
         self.btn_open_dir.configure(state="normal")
         self.btn_uninstall.configure(state="normal" if d.is_installed else "disabled")
         if d.is_installed:
             self.addon_status_label.configure(
-                text=f"v{d.installed_version} installed in:\n{d.path}",
+                t("setup.status.installed", version=d.installed_version, path=str(d.path)),
                 text_color=T.OK,
             )
         else:
             self.addon_status_label.configure(
-                text=f"Will install into:\n{d.path}", text_color=T.INK_MUTED,
+                t("setup.status.will_install", path=str(d.path)), text_color=T.INK_MUTED,
             )
 
     def _pick_addon_dir(self) -> None:
@@ -971,7 +958,7 @@ class OllamaToBlenderApp(ctk.CTk):
     def _add_manual_addon_dir(self) -> None:
         raw = self.addon_manual_entry.get().strip()
         if not raw:
-            Toast(self, "Type or browse to a folder first", kind="warn")
+            Toast(self, t("toast.attach_pick_first"), kind="warn")
             return
         path = Path(raw).expanduser()
         # Try to infer version from path (X.Y component)
@@ -1000,7 +987,7 @@ class OllamaToBlenderApp(ctk.CTk):
         if d is None:
             return
         self.btn_install.configure(state="disabled", text="working…")
-        self.addon_status_label.configure(text="installing…", text_color=T.WARN)
+        self.addon_status_label.configure(text=t("setup.status.installing"), text_color=T.WARN)
         source = self._addon_source.get()
         threading.Thread(target=self._install_addon_worker, args=(d, source), daemon=True).start()
 
@@ -1008,14 +995,14 @@ class OllamaToBlenderApp(ctk.CTk):
         try:
             dest = install_addon(d, source=source)
         except Exception as exc:
-            self.after(0, lambda: Toast(self, f"Install failed: {exc}", kind="err"))
+            self.after(0, lambda: Toast(self, t("toast.addon_install_failed", error=str(exc)), kind="err"))
             self.after(0, lambda: self.addon_status_label.configure(
-                text=f"Install failed: {exc}", text_color=T.ERR
+                text=t("setup.status.failed", error=str(exc)), text_color=T.ERR
             ))
             self.after(0, self._update_addon_actions)
             self.after(0, lambda: self._log(f"addon install failed: {exc}"))
             return
-        self.after(0, lambda: Toast(self, f"Addon installed (v{d.installed_version})", kind="ok"))
+        self.after(0, lambda: Toast(self, t("toast.addon_installed", version=d.installed_version), kind="ok"))
         self.after(0, lambda: self._log(f"addon installed v{d.installed_version} → {dest}"))
         self.after(0, self._refresh_addon_dirs)
 
@@ -1024,18 +1011,18 @@ class OllamaToBlenderApp(ctk.CTk):
         if d is None:
             return
         if not open_addon_dir(d):
-            Toast(self, "Could not open file explorer", kind="err")
+            Toast(self, t("toast.cant_open_explorer"), kind="err")
 
     def _on_uninstall_addon(self) -> None:
         d = self._selected_addon_dir()
         if d is None or not d.is_installed:
             return
         if uninstall_addon(d):
-            Toast(self, "Addon removed", kind="ok")
+            Toast(self, t("toast.addon_removed"), kind="ok")
             self._log(f"addon uninstalled from {d.path}")
             self._refresh_addon_dirs()
         else:
-            Toast(self, "Could not remove the addon file", kind="err")
+            Toast(self, t("toast.addon_remove_failed"), kind="err")
 
     # =========================================================== models view
 
@@ -1045,12 +1032,12 @@ class OllamaToBlenderApp(ctk.CTk):
         view.grid_rowconfigure(2, weight=1)
         self._views["models"] = view
 
-        ctk.CTkLabel(view, text="Models", text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
+        ctk.CTkLabel(view, text=t("models.title"), text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
             row=0, column=0, sticky="w", padx=4, pady=(0, 6)
         )
         ctk.CTkLabel(
             view,
-            text="Manage local Ollama models. Q4_K_M is the recommended quantization (best quality / size trade-off).",
+            text=t("models.subtitle"),
             text_color=T.INK_MUTED,
             font=(T.FONT_FAMILY, 13),
         ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 12))
@@ -1068,8 +1055,8 @@ class OllamaToBlenderApp(ctk.CTk):
         installed_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         head1 = ctk.CTkFrame(installed_card, fg_color="transparent")
         head1.pack(fill="x", padx=14, pady=(12, 4))
-        ctk.CTkLabel(head1, text="Installed", text_color=T.INK, font=(T.FONT_FAMILY, 15, "bold")).pack(side="left")
-        IconButton(head1, text="Refresh", command=self._refresh_models_list, width=84).pack(side="right")
+        ctk.CTkLabel(head1, text=t("models.installed.title"), text_color=T.INK, font=(T.FONT_FAMILY, 15, "bold")).pack(side="left")
+        IconButton(head1, text=t("models.btn.refresh") if "models.btn.refresh" else t("setup.btn.refresh"), command=self._refresh_models_list, width=84).pack(side="right")
 
         self.installed_frame = ctk.CTkScrollableFrame(installed_card, fg_color="transparent")
         self.installed_frame.pack(fill="both", expand=True, padx=8, pady=(4, 12))
@@ -1079,19 +1066,19 @@ class OllamaToBlenderApp(ctk.CTk):
             body, fg_color=T.BG_PANEL, corner_radius=T.R_LG, border_width=1, border_color=T.EDGE
         )
         pull_card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        ctk.CTkLabel(pull_card, text="Pull a model", text_color=T.INK, font=(T.FONT_FAMILY, 15, "bold")).pack(
+        ctk.CTkLabel(pull_card, text=t("models.pull.title"), text_color=T.INK, font=(T.FONT_FAMILY, 15, "bold")).pack(
             anchor="w", padx=14, pady=(12, 4)
         )
         ctk.CTkLabel(
             pull_card,
-            text="Recommended (defaults to Q4_K_M):",
+            text=t("models.pull.recommended"),
             text_color=T.INK_MUTED,
             font=(T.FONT_FAMILY, 12),
         ).pack(anchor="w", padx=14)
 
         self.pull_entry = ctk.CTkEntry(
             pull_card,
-            placeholder_text="e.g. qwen2.5-coder:7b",
+            placeholder_text=t("models.pull.placeholder"),
             fg_color=T.BG_INPUT,
             border_color=T.EDGE,
             text_color=T.INK,
@@ -1122,7 +1109,7 @@ class OllamaToBlenderApp(ctk.CTk):
 
         ctk.CTkButton(
             pull_card,
-            text="⬇  Pull model",
+            text=t("models.pull.btn"),
             fg_color=T.ACCENT,
             hover_color=T.ACCENT_HOVER,
             text_color="#1a1a1a",
@@ -1146,7 +1133,7 @@ class OllamaToBlenderApp(ctk.CTk):
         if not self.ollama.is_alive():
             ctk.CTkLabel(
                 self.installed_frame,
-                text="Ollama is offline.\nStart it with `ollama serve`.",
+                text=t("models.ollama_offline"),
                 text_color=T.INK_DIM,
                 font=(T.FONT_FAMILY, 14),
                 justify="center",
@@ -1157,7 +1144,7 @@ class OllamaToBlenderApp(ctk.CTk):
         if not models:
             ctk.CTkLabel(
                 self.installed_frame,
-                text="No models installed yet.\nUse the panel on the right to pull one.",
+                text=t("models.installed.empty"),
                 text_color=T.INK_DIM,
                 font=(T.FONT_FAMILY, 14),
                 justify="center",
@@ -1174,7 +1161,7 @@ class OllamaToBlenderApp(ctk.CTk):
             is_active = m.name == self.settings.ollama_model
             use_btn = ctk.CTkButton(
                 row,
-                text="Active" if is_active else "Use",
+                text=t("models.btn.active") if is_active else t("models.btn.use"),
                 width=82,
                 height=34,
                 fg_color=T.ACCENT if is_active else "transparent",
@@ -1199,7 +1186,7 @@ class OllamaToBlenderApp(ctk.CTk):
         self._save_settings()
         self.model_combo.set(name)
         self._refresh_models_list()
-        Toast(self, f"Model set to {name}", kind="ok")
+        Toast(self, t("toast.model_set", name=name), kind="ok")
 
     def _on_model_changed(self, name: str) -> None:
         self.settings.ollama_model = name
@@ -1240,7 +1227,7 @@ class OllamaToBlenderApp(ctk.CTk):
             self.attach_filename_label.configure(text=Path(path).name)
             self.attach_row.pack(fill="x", before=self._ctrl_row)
         except Exception as exc:
-            Toast(self, f"Could not read image: {exc}", kind="err")
+            Toast(self, t("toast.image_error", error=str(exc)), kind="err")
 
     def _clear_attached_image(self) -> None:
         self._attached_image_b64 = None
@@ -1261,7 +1248,7 @@ class OllamaToBlenderApp(ctk.CTk):
         if not name:
             return
         self.pull_progress.set(0)
-        self.pull_status.configure(text="starting…")
+        self.pull_status.configure(text=t("models.pull.starting"))
         threading.Thread(target=self._pull_worker, args=(name,), daemon=True).start()
 
     def _pull_worker(self, name: str) -> None:
@@ -1279,12 +1266,12 @@ class OllamaToBlenderApp(ctk.CTk):
                 else:
                     self.after(0, lambda s=status: self.pull_status.configure(text=s))
         except Exception as exc:
-            self.after(0, lambda: self.pull_status.configure(text=f"error: {exc}"))
-            self.after(0, lambda: Toast(self, f"Pull failed: {exc}", kind="err"))
+            self.after(0, lambda: self.pull_status.configure(text=t("models.pull.error", error=str(exc))))
+            self.after(0, lambda: Toast(self, t("toast.pull_failed", error=str(exc)), kind="err"))
             return
         self.after(0, self.pull_progress.set, 1.0)
-        self.after(0, lambda: self.pull_status.configure(text="✓ pulled"))
-        self.after(0, lambda: Toast(self, f"Pulled {name}", kind="ok"))
+        self.after(0, lambda: self.pull_status.configure(text=t("models.pull.done")))
+        self.after(0, lambda: Toast(self, t("toast.pulled", name=name), kind="ok"))
         self.after(0, self._refresh_models_list)
 
     # =========================================================== settings view
@@ -1294,7 +1281,7 @@ class OllamaToBlenderApp(ctk.CTk):
         view.grid_columnconfigure(0, weight=1)
         self._views["settings"] = view
 
-        ctk.CTkLabel(view, text="Settings", text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
+        ctk.CTkLabel(view, text=t("settings.title"), text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
             row=0, column=0, sticky="w", padx=4, pady=(0, 12)
         )
 
@@ -1303,56 +1290,56 @@ class OllamaToBlenderApp(ctk.CTk):
         view.grid_rowconfigure(1, weight=1)
 
         # --- Ollama
-        sect = self._settings_section(scroll, "Ollama (local LLM)")
+        sect = self._settings_section(scroll, t("settings.section.ollama"))
         self.s_ollama_url = self._setting_row(sect, "Endpoint", self.settings.ollama_url,
-                                              tooltip="HTTP URL of your Ollama daemon")
+                                              tooltip=t("settings.endpoint.tooltip"))
         self.s_temp = self._setting_row(sect, "Temperature", str(self.settings.temperature),
-                                        tooltip="0.0 = deterministic, 0.2 ≈ default, 0.7+ = creative")
+                                        tooltip=t("settings.temperature.tooltip"))
         self.s_keepalive = self._setting_row(sect, "Keep-alive", self.settings.keep_alive,
-                                             tooltip="How long Ollama keeps the model loaded after a request, e.g. 5m, 1h, -1 for forever")
+                                             tooltip=t("settings.keepalive.tooltip"))
 
         # --- Blender
-        sect = self._settings_section(scroll, "Blender (TCP addon)")
+        sect = self._settings_section(scroll, t("settings.section.blender"))
         self.s_blender_host = self._setting_row(sect, "Host", self.settings.blender_host,
-                                                tooltip="Usually 127.0.0.1 if Blender runs on the same machine")
+                                                tooltip=t("settings.host.tooltip"))
         self.s_blender_port = self._setting_row(sect, "Port", str(self.settings.blender_port),
-                                                tooltip="The addon defaults to 9876")
+                                                tooltip=t("settings.port.tooltip"))
         IconButton(
-            sect, text="Test connection", command=self._test_blender,
-            tooltip="Send a ping to the Blender addon", width=190, height=34,
+            sect, text=t("settings.btn.test_connection"), command=self._test_blender,
+            tooltip=t("settings.btn.test_connection.tooltip"), width=190, height=34,
         ).pack(anchor="w", padx=14, pady=(0, 12))
 
         # --- Behaviour
-        sect = self._settings_section(scroll, "Behaviour")
+        sect = self._settings_section(scroll, t("settings.section.behaviour"))
         self.s_persist = ctk.BooleanVar(value=self.settings.persist_history)
         chk = ctk.CTkCheckBox(
-            sect, text="Persist conversation history between sessions",
+            sect, text=t("settings.persist"),
             variable=self.s_persist,
             text_color=T.INK_MUTED, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
             border_color=T.EDGE, font=(T.FONT_FAMILY, 13),
         )
         chk.pack(anchor="w", padx=14, pady=(4, 4))
-        attach_tooltip(chk, "Stored at ~/.ollamatoblender/history.json")
+        attach_tooltip(chk, t("settings.persist.tooltip"))
 
         self.s_route = ctk.BooleanVar(value=self.settings.auto_route_prompt)
         chk2 = ctk.CTkCheckBox(
-            sect, text="Auto-route system prompt (query vs build)",
+            sect, text=t("settings.route"),
             variable=self.s_route,
             text_color=T.INK_MUTED, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
             border_color=T.EDGE, font=(T.FONT_FAMILY, 13),
         )
         chk2.pack(anchor="w", padx=14, pady=(0, 4))
-        attach_tooltip(chk2, "Read-only inspections get a shorter prompt; creative builds get the full one")
+        attach_tooltip(chk2, t("settings.route.tooltip"))
 
         self.s_updates = ctk.BooleanVar(value=self.settings.check_for_updates)
         chk3 = ctk.CTkCheckBox(
-            sect, text="Check GitHub Releases for updates on startup",
+            sect, text=t("settings.updates"),
             variable=self.s_updates,
             text_color=T.INK_MUTED, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
             border_color=T.EDGE, font=(T.FONT_FAMILY, 13),
         )
         chk3.pack(anchor="w", padx=14, pady=(0, 4))
-        attach_tooltip(chk3, "Notifies if a newer OllamaToBlender release is available")
+        attach_tooltip(chk3, t("settings.updates.tooltip"))
 
         # Numeric: max history tokens, max fix attempts
         self.s_max_hist = self._setting_row(sect, "Max history tokens", str(self.settings.max_history_tokens),
@@ -1362,11 +1349,11 @@ class OllamaToBlenderApp(ctk.CTk):
         ctk.CTkLabel(sect, text="").pack(pady=(0, 8))
 
         # --- Appearance
-        sect = self._settings_section(scroll, "Appearance")
+        sect = self._settings_section(scroll, t("settings.section.appearance"))
         appearance_row = ctk.CTkFrame(sect, fg_color="transparent")
         appearance_row.pack(fill="x", padx=14, pady=(4, 12))
         ctk.CTkLabel(
-            appearance_row, text="Theme", text_color=T.INK_MUTED, width=160, anchor="w",
+            appearance_row, text=t("settings.theme"), text_color=T.INK_MUTED, width=160, anchor="w",
             font=(T.FONT_FAMILY, 13),
         ).pack(side="left")
         self.s_appearance = ctk.CTkSegmentedButton(
@@ -1384,11 +1371,40 @@ class OllamaToBlenderApp(ctk.CTk):
         self.s_appearance.set(self.settings.appearance_mode)
         self.s_appearance.pack(side="left")
 
+        # Language selector
+        lang_row = ctk.CTkFrame(sect, fg_color="transparent")
+        lang_row.pack(fill="x", padx=14, pady=(4, 12))
+        lang_label_w = ctk.CTkLabel(
+            lang_row, text=t("settings.language"), text_color=T.INK_MUTED, width=160, anchor="w",
+            font=(T.FONT_FAMILY, 13),
+        )
+        lang_label_w.pack(side="left")
+        attach_tooltip(lang_label_w, t("settings.language.tooltip"))
+        lang_codes = ["auto", *available_languages()]
+        lang_display = ["Auto", *[LANGUAGE_LABELS.get(c, c) for c in available_languages()]]
+        self._lang_display_to_code = dict(zip(lang_display, lang_codes))
+        self.s_language = ctk.CTkSegmentedButton(
+            lang_row,
+            values=lang_display,
+            command=self._on_language_changed,
+            fg_color=T.BG_INPUT,
+            selected_color=T.ACCENT,
+            selected_hover_color=T.ACCENT_HOVER,
+            unselected_color=T.BG_RAISED,
+            unselected_hover_color=T.EDGE,
+            text_color=T.INK,
+            font=(T.FONT_FAMILY, 13),
+        )
+        code_to_display = {v: k for k, v in self._lang_display_to_code.items()}
+        self.s_language.set(code_to_display.get(self.settings.language, "Auto"))
+        self.s_language.pack(side="left")
+        # CTkSegmentedButton does not support .bind(), so only the label gets a tooltip.
+
         save_row = ctk.CTkFrame(scroll, fg_color="transparent")
         save_row.pack(fill="x", pady=(8, 0))
         ctk.CTkButton(
             save_row,
-            text="Save settings",
+            text=t("settings.btn.save"),
             fg_color=T.ACCENT,
             hover_color=T.ACCENT_HOVER,
             text_color="#1a1a1a",
@@ -1430,6 +1446,14 @@ class OllamaToBlenderApp(ctk.CTk):
         ctk.set_appearance_mode(value)
         self._save_settings()
 
+    def _on_language_changed(self, display: str) -> None:
+        code = self._lang_display_to_code.get(display, "auto")
+        self.settings.language = code
+        applied = set_language(code)
+        self._save_settings()
+        Toast(self, t("toast.settings_saved"), kind="ok")
+        self._log(f"language switched to {applied}")
+
     def _on_save_settings_clicked(self) -> None:
         try:
             self.settings.ollama_url = self.s_ollama_url.get().strip()
@@ -1443,20 +1467,20 @@ class OllamaToBlenderApp(ctk.CTk):
             self.settings.max_history_tokens = max(512, int(self.s_max_hist.get().strip() or 8000))
             self.settings.max_fix_attempts = max(0, int(self.s_max_fix.get().strip() or 1))
         except ValueError as exc:
-            Toast(self, f"Invalid value: {exc}", kind="err")
+            Toast(self, t("toast.invalid_value", error=str(exc)), kind="err")
             return
         self.ollama = OllamaClient(self.settings.ollama_url)
         self.blender = BlenderClient(self.settings.blender_host, self.settings.blender_port)
         self._save_settings()
         self._refresh_status()
-        Toast(self, "Settings saved", kind="ok")
+        Toast(self, t("toast.settings_saved"), kind="ok")
 
     def _test_blender(self) -> None:
         host = self.s_blender_host.get().strip() or "127.0.0.1"
         try:
             port = int(self.s_blender_port.get().strip() or 9876)
         except ValueError:
-            Toast(self, "Port must be an integer", kind="err")
+            Toast(self, t("toast.invalid_port"), kind="err")
             return
         client = BlenderClient(host, port)
         threading.Thread(target=lambda: self._test_blender_async(client), daemon=True).start()
@@ -1467,7 +1491,7 @@ class OllamaToBlenderApp(ctk.CTk):
             0,
             lambda: Toast(
                 self,
-                "Blender reachable" if ok else "No response from Blender",
+                t("toast.blender_reachable") if ok else t("toast.blender_unreachable"),
                 kind="ok" if ok else "err",
             ),
         )
@@ -1480,7 +1504,7 @@ class OllamaToBlenderApp(ctk.CTk):
         view.grid_rowconfigure(2, weight=1)
         self._views["logs"] = view
 
-        ctk.CTkLabel(view, text="Logs", text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
+        ctk.CTkLabel(view, text=t("logs.title"), text_color=T.INK, font=(T.FONT_FAMILY, 24, "bold")).grid(
             row=0, column=0, sticky="w", padx=4, pady=(0, 6)
         )
 
@@ -1488,12 +1512,12 @@ class OllamaToBlenderApp(ctk.CTk):
         bar.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 8))
         ctk.CTkLabel(
             bar,
-            text=f"file: {LOG_PATH}",
+            text=t("logs.file", path=str(LOG_PATH)),
             text_color=T.INK_DIM,
             font=(T.FONT_MONO, 12),
         ).pack(side="left")
         IconButton(bar, text="Clear", command=self._clear_logs, width=82, tooltip="Wipe in-memory and on-disk log").pack(side="right")
-        IconButton(bar, text="Refresh", command=self._refresh_logs_view, width=92).pack(side="right", padx=(0, 8))
+        IconButton(bar, text=t("logs.btn.refresh"), command=self._refresh_logs_view, width=92).pack(side="right", padx=(0, 8))
 
         self.log_box = ctk.CTkTextbox(
             view,
@@ -1519,7 +1543,7 @@ class OllamaToBlenderApp(ctk.CTk):
             except OSError:
                 pass
         else:
-            self.log_box.insert("1.0", "(no events yet)")
+            self.log_box.insert("1.0", t("logs.empty"))
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
@@ -1563,14 +1587,9 @@ class OllamaToBlenderApp(ctk.CTk):
             card, text=f"v{self.APP_VERSION}", text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13)
         ).pack(pady=(2, 14))
 
-        body = (
-            "Run Blender from a local LLM — no Anthropic, no OpenAI, no API key.\n\n"
-            "Pipeline:  natural-language prompt  →  Ollama (Q4_K_M code model)  →  "
-            "Python bpy script  →  blender-mcp-addon TCP :9876.\n\n"
-            "Recommended model:  qwen2.5-coder:7b  (Q4_K_M, ~4.7 GB)."
-        )
+        body = t("about.body")
         ctk.CTkLabel(
-            card, text=body, text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 14),
+            card, text=t("about.body"), text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 14),
             wraplength=820, justify="center",
         ).pack(padx=24, pady=(0, 16))
 
@@ -1578,18 +1597,18 @@ class OllamaToBlenderApp(ctk.CTk):
         sc_card = ctk.CTkFrame(view, fg_color=T.BG_PANEL, corner_radius=T.R_LG, border_width=1, border_color=T.EDGE)
         sc_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         ctk.CTkLabel(
-            sc_card, text="Keyboard shortcuts", text_color=T.INK,
+            sc_card, text=t("about.shortcuts.title"), text_color=T.INK,
             font=(T.FONT_FAMILY, 15, "bold"),
         ).pack(anchor="w", padx=18, pady=(14, 6))
         for label, accel in [
-            ("Send prompt", "Ctrl+Enter"),
-            ("Stop streaming", "Esc"),
-            ("Clear conversation", "Ctrl+L"),
-            ("Focus prompt", "Ctrl+K"),
-            ("Open Settings", "Ctrl+,"),
-            ("Switch to Chat", "Ctrl+1"),
-            ("Switch to Models", "Ctrl+2"),
-            ("Switch to Logs", "Ctrl+3"),
+            (t("shortcut.send"), "Ctrl+Enter"),
+            (t("shortcut.stop"), "Esc"),
+            (t("shortcut.clear"), "Ctrl+L"),
+            (t("shortcut.focus"), "Ctrl+K"),
+            (t("shortcut.settings"), "Ctrl+,"),
+            (t("shortcut.chat"), "Ctrl+1"),
+            (t("shortcut.models"), "Ctrl+2"),
+            (t("shortcut.logs"), "Ctrl+3"),
         ]:
             r = ctk.CTkFrame(sc_card, fg_color="transparent")
             r.pack(fill="x", padx=18, pady=2)
@@ -1614,11 +1633,11 @@ class OllamaToBlenderApp(ctk.CTk):
         ).start()
 
     def _apply_status(self, ollama_ok: bool, blender_ok: bool) -> None:
-        self.pill_ollama.set_state("ok" if ollama_ok else "err", "Ollama" if ollama_ok else "Ollama offline")
-        self.pill_blender.set_state("ok" if blender_ok else "warn", "Blender" if blender_ok else "Blender offline")
+        self.pill_ollama.set_state("ok" if ollama_ok else "err", t("pill.ollama") if ollama_ok else t("pill.ollama.offline"))
+        self.pill_blender.set_state("ok" if blender_ok else "warn", t("pill.blender") if blender_ok else t("pill.blender.offline"))
 
     def _apply_blender_only(self, ok: bool) -> None:
-        self.pill_blender.set_state("ok" if ok else "warn", "Blender" if ok else "Blender offline")
+        self.pill_blender.set_state("ok" if ok else "warn", t("pill.blender") if ok else t("pill.blender.offline"))
 
     def _poll_status_loop(self) -> None:
         self._refresh_status()

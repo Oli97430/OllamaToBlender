@@ -36,6 +36,9 @@ class Settings:
     # Update check
     check_for_updates: bool = True
 
+    # i18n: "auto" | "en" | "fr"
+    language: str = "auto"
+
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
         path = path or DEFAULT_PATH
