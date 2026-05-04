@@ -56,7 +56,7 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 class OllamaToBlenderApp(ctk.CTk):
     APP_TITLE = "OllamaToBlender"
-    APP_VERSION = "1.1.0"
+    APP_VERSION = "1.1.1"
 
     def __init__(self) -> None:
         super().__init__()
@@ -428,18 +428,12 @@ class OllamaToBlenderApp(ctk.CTk):
         ).pack()
 
         suggestions = [
-            t("suggest.studio_scene"),
-            t("suggest.torus_anim"),
-            t("suggest.forest"),
-            t("suggest.list_objects"),
-            t("suggest.golden_hour"),
-            t("suggest.suzanne"),
-            t("suggest.bmesh_hex"),
-            t("suggest.camera_turntable"),
-            t("suggest.modifier_stack"),
-            t("suggest.rigid_body"),
-            t("suggest.particles"),
-            t("suggest.export_obj"),
+            t("suggest.sculpt_suzanne"),
+            t("suggest.sculpt_dyntopo"),
+            t("suggest.sculpt_voxel_remesh"),
+            t("suggest.sculpt_mirror_multires"),
+            t("suggest.sculpt_shape_keys"),
+            t("suggest.sculpt_decimate"),
         ]
         sug_frame = ctk.CTkFrame(self.empty_state, fg_color="transparent")
         sug_frame.pack(pady=24)

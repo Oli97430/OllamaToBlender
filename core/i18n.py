@@ -238,19 +238,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "toast.attach_pick_first": "Type or browse to a folder first",
         "toast.cant_open_explorer": "Could not open file explorer",
 
-        # --- empty state suggestion chips
-        "suggest.studio_scene": "Build a stylised studio scene: a wood floor, a glass icosphere, and a 3-point lighting rig",
-        "suggest.torus_anim": "Make a 48-frame seamless looping animation of a metallic torus orbiting a sun lamp",
-        "suggest.forest": "Generate a procedural low-poly forest: 12 trees with random heights on a 20×20 ground plane",
-        "suggest.list_objects": "List every object in the scene with its type, vertex count, and material names",
-        "suggest.golden_hour": "Set up a soft golden-hour sun, then render a 720p preview from the camera",
-        "suggest.suzanne": "Wipe the scene, then add a single Suzanne with a brushed-copper Principled BSDF material",
-        "suggest.bmesh_hex": "Use bmesh to build a custom hex-grid floor (8×8 cells, hex radius 0.5) centred at origin",
-        "suggest.camera_turntable": "Add a 35mm camera 8 m from origin and animate a 120-frame turntable around the active object",
-        "suggest.modifier_stack": "Apply Subdivision (viewport level 3), Bevel (width 0.04), then Wireframe to the active mesh",
-        "suggest.rigid_body": "Drop 20 random-coloured cubes onto a passive ground plane with rigid body physics over 60 frames",
-        "suggest.particles": "Scatter 200 small icospheres across the surface of the active mesh with a hair particle system",
-        "suggest.export_obj": "Export every visible mesh to a separate .obj file under a new 'export/' folder next to the .blend",
+        # --- empty state suggestion chips (sculpting-focused)
+        "suggest.sculpt_suzanne": "Add Suzanne, give it a Multires modifier (3 subdivisions), then switch to Sculpt mode ready for the Grab brush",
+        "suggest.sculpt_dyntopo": "Spawn an icosphere, enable Dyntopo (detail 2.0) and enter Sculpt mode",
+        "suggest.sculpt_voxel_remesh": "Voxel-remesh the active mesh at 0.05, then enter Sculpt mode for further detailing",
+        "suggest.sculpt_mirror_multires": "Add a Mirror modifier (X axis) and a Multires modifier (level 4) to the active mesh for symmetric sculpting",
+        "suggest.sculpt_shape_keys": "Create three shape keys on the active mesh — smile, frown, surprise — leaving each value at 0 for now",
+        "suggest.sculpt_decimate": "Decimate the active sculpt to 25 % polycount and apply it, ready for retopology baking",
     },
 
     "fr": {
@@ -463,19 +457,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "toast.attach_pick_first": "Saisis ou parcours un dossier d'abord",
         "toast.cant_open_explorer": "Impossible d'ouvrir l'explorateur",
 
-        # --- empty state suggestion chips (in French)
-        "suggest.studio_scene": "Crée une scène studio stylisée : sol en bois, icosphère en verre, éclairage 3-points",
-        "suggest.torus_anim": "Anime un tore métallique en orbite autour d'un Sun, 48 frames en boucle parfaite",
-        "suggest.forest": "Génère une forêt low-poly procédurale : 12 arbres de hauteurs aléatoires sur un sol 20×20",
-        "suggest.list_objects": "Liste tous les objets de la scène avec leur type, nombre de sommets et noms de matériaux",
-        "suggest.golden_hour": "Configure un Sun couleur golden hour, puis rends un aperçu 720p depuis la caméra",
-        "suggest.suzanne": "Vide la scène, puis ajoute une Suzanne en cuivre brossé (Principled BSDF)",
-        "suggest.bmesh_hex": "Construis avec bmesh un sol hexagonal personnalisé (grille 8×8, rayon 0,5) centré à l'origine",
-        "suggest.camera_turntable": "Ajoute une caméra 35 mm à 8 m de l'origine et anime un turntable de 120 frames autour de l'objet actif",
-        "suggest.modifier_stack": "Applique Subdivision (niveau viewport 3), Bevel (largeur 0,04) puis Wireframe à l'objet actif",
-        "suggest.rigid_body": "Fais tomber 20 cubes de couleurs aléatoires sur un sol passif avec rigid body physics, 60 frames",
-        "suggest.particles": "Disperse 200 petites icosphères sur la surface de l'objet actif avec un système de particules hair",
-        "suggest.export_obj": "Exporte chaque mesh visible dans un .obj séparé sous un nouveau dossier 'export/' à côté du .blend",
+        # --- empty state suggestion chips (sculpting-focused, in French)
+        "suggest.sculpt_suzanne": "Ajoute Suzanne, applique un modificateur Multires (3 subdivisions), puis bascule en mode Sculpt prêt pour le brush Grab",
+        "suggest.sculpt_dyntopo": "Crée une icosphère, active Dyntopo (détail 2,0) et entre en mode Sculpt",
+        "suggest.sculpt_voxel_remesh": "Voxel-remesh l'objet actif à 0,05, puis entre en mode Sculpt pour le détaillage",
+        "suggest.sculpt_mirror_multires": "Ajoute un modificateur Mirror (axe X) et un Multires (niveau 4) à l'objet actif pour un sculpting symétrique",
+        "suggest.sculpt_shape_keys": "Crée trois shape keys sur l'objet actif — smile, frown, surprise — toutes à la valeur 0 pour l'instant",
+        "suggest.sculpt_decimate": "Décime le sculpt actif à 25 % de polygones et applique, prêt pour le baking de retopologie",
     },
 }
 

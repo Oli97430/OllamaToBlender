@@ -224,6 +224,37 @@ GEOMETRY NODES
       group.interface.new_socket(name='Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
   (Do NOT use `group.inputs.new(...)` — that was the 3.x API and is gone in 4.x.)
 
+SCULPTING API (Blender 4.x)
+- `bpy.data.brushes.new()` takes ONLY `(name, mode)` — the `tool` kwarg was REMOVED in 4.x.
+  WRONG:  brush = bpy.data.brushes.new(name="Grab", mode='SCULPT', tool='DRAW')   # TypeError!
+  CORRECT:
+      brush = bpy.data.brushes.new(name="MySculptBrush", mode='SCULPT')
+      brush.sculpt_tool = 'GRAB'   # set the tool type as a property AFTER creation
+  Valid `sculpt_tool` values (all caps strings):
+      'DRAW', 'DRAW_SHARP', 'CLAY', 'CLAY_STRIPS', 'CLAY_THUMB', 'LAYER', 'INFLATE',
+      'BLOB', 'CREASE', 'SMOOTH', 'FLATTEN', 'FILL', 'SCRAPE', 'MULTIPLANE_SCRAPE',
+      'PINCH', 'GRAB', 'ELASTIC_DEFORM', 'SNAKE_HOOK', 'THUMB', 'POSE', 'NUDGE',
+      'ROTATE', 'TOPOLOGY', 'BOUNDARY', 'CLOTH', 'SIMPLIFY', 'MASK',
+      'DRAW_FACE_SETS', 'MULTIRES_DISPLACEMENT_SMEAR', 'PAINT', 'SMEAR'
+- To enter Sculpt mode: `bpy.ops.object.mode_set(mode='SCULPT')` — the runtime override handles context.
+- Dyntopo:
+      bpy.ops.sculpt.dynamic_topology_toggle()   # toggle on
+      ts = bpy.context.tool_settings.sculpt
+      ts.detail_size = 2.0                       # constant detail in px
+      ts.detail_type_method = 'CONSTANT'         # or 'RELATIVE', 'BRUSH'
+- Voxel remesh (fast, destructive):
+      obj.data.remesh_voxel_size = 0.05
+      bpy.ops.object.voxel_remesh()
+- Multires modifier:
+      mod = obj.modifiers.new(name="Multires", type='MULTIRES')
+      # subdivide N times:
+      for _ in range(3):
+          bpy.ops.object.multires_subdivide(modifier="Multires", mode='CATMULL_CLARK')
+- Shape keys: always add a "Basis" key first:
+      obj.shape_key_add(name="Basis")
+      sk = obj.shape_key_add(name="Smile")
+      sk.value = 0.0   # slider stays at 0 until the user moves it
+
 CAMERAS / TURNTABLES
 - For a turntable around the active object: parent an Empty to the object's location, parent
   the camera to the empty, then keyframe the empty's `rotation_euler.z` from 0 → 2π over the
@@ -323,4 +354,6 @@ REMEMBER:
 - For particles: read from `obj.particle_systems[-1].settings`, not from `modifiers[-1]`.
 - For geometry nodes interface: `group.interface.new_socket(...)`, NOT `group.inputs.new(...)`.
 - Always pair `bmesh.new()` with `bm.to_mesh(mesh)` + `bm.free()`.
+- For sculpt brushes: `bpy.data.brushes.new(name, mode='SCULPT')` only — no `tool=` kwarg.
+  Set the tool type AFTER: `brush.sculpt_tool = 'GRAB'`. Never pass `tool=` to `.new()`.
 """
