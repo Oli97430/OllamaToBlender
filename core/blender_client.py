@@ -1,11 +1,83 @@
 """TCP client for the blender-mcp-addon (server on port 9876)."""
 from __future__ import annotations
 
+import ast
 import json
 import socket
 import textwrap
 from dataclasses import dataclass
 from typing import Any
+
+
+def _is_brushes_new_call(call: ast.Call) -> bool:
+    f = call.func
+    if not (isinstance(f, ast.Attribute) and f.attr == "new"):
+        return False
+    if not (isinstance(f.value, ast.Attribute) and f.value.attr == "brushes"):
+        return False
+    if not (isinstance(f.value.value, ast.Attribute) and f.value.value.attr == "data"):
+        return False
+    root = f.value.value.value
+    return isinstance(root, ast.Name) and root.id == "bpy"
+
+
+class _BrushApiFixer(ast.NodeTransformer):
+    """Strip the removed `tool=` kwarg from `bpy.data.brushes.new(...)` calls.
+
+    `BlendDataBrushes.new()` in Blender 4.x only accepts (name, mode); the
+    `tool` kwarg was removed. If the call result is assigned to a local name,
+    insert a follow-up `<name>.sculpt_tool = <value>` to preserve intent.
+    """
+
+    def visit_Assign(self, node: ast.Assign):
+        # Inspect the brush call BEFORE recursing — generic_visit would
+        # otherwise hit visit_Call and strip the `tool=` kwarg first.
+        if (
+            isinstance(node.value, ast.Call)
+            and _is_brushes_new_call(node.value)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            tool_kw = next((k for k in node.value.keywords if k.arg == "tool"), None)
+            if tool_kw is not None:
+                node.value.keywords = [k for k in node.value.keywords if k.arg != "tool"]
+                follow = ast.Assign(
+                    targets=[
+                        ast.Attribute(
+                            value=ast.Name(id=node.targets[0].id, ctx=ast.Load()),
+                            attr="sculpt_tool",
+                            ctx=ast.Store(),
+                        )
+                    ],
+                    value=tool_kw.value,
+                )
+                return [node, follow]
+        self.generic_visit(node)
+        return node
+
+    def visit_Call(self, node: ast.Call):
+        self.generic_visit(node)
+        if _is_brushes_new_call(node):
+            node.keywords = [k for k in node.keywords if k.arg != "tool"]
+        return node
+
+
+def sanitize_code(code: str) -> str:
+    """Best-effort rewrite of known-bad Blender 4+ API patterns.
+
+    Currently fixes: `bpy.data.brushes.new(..., tool=X)` → drops the kwarg
+    and (when assigned) appends `target.sculpt_tool = X`.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+    tree = _BrushApiFixer().visit(tree)
+    ast.fix_missing_locations(tree)
+    try:
+        return ast.unparse(tree)
+    except Exception:
+        return code
 
 
 @dataclass
@@ -139,6 +211,7 @@ class BlenderClient:
         auto_v3d: bool = True,
         with_render: bool = False,
     ) -> BlenderResult:
+        code = sanitize_code(code)
         if with_render:
             code = wrap_with_render(code)
         elif auto_v3d:
