@@ -1,287 +1,277 @@
 <h1 align="center">OllamaToBlender</h1>
 
 <p align="center">
-  <img src="assets/logo.png" alt="OllamaToBlender logo" width="160" />
+  <img src="assets/logo.png" alt="OllamaToBlender logo" width="140" />
 </p>
 
 <p align="center">
-  <b>Pilote Blender depuis un LLM 100&nbsp;% local</b> — sans Claude, sans OpenAI, sans clé d'API.<br/>
-  Pipeline&nbsp;:  prompt en langage naturel → Ollama → script <code>bpy</code> → addon TCP <code>blender-mcp-addon</code> (port 9876).
+  <b>Drive Blender with a 100&nbsp;% local LLM — no API key, no cloud, no subscription.</b><br/>
+  Natural language prompt → Ollama → <code>bpy</code> script → <code>blender-mcp-addon</code> TCP server (port&nbsp;9876).
 </p>
 
 <p align="center">
-  <a href="https://github.com/Oli97430/OllamaToBlender/releases/latest"><img src="https://img.shields.io/github/v/release/Oli97430/OllamaToBlender?display_name=tag&color=ff7a29" alt="Latest release"/></a>
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/blender-4.0%2B-orange" alt="Blender"/>
-  <img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="License"/>
+  <a href="https://github.com/Oli97430/OllamaToBlender/releases/latest">
+    <img src="https://img.shields.io/github/v/release/Oli97430/OllamaToBlender?display_name=tag&color=ff7a29" alt="Latest release"/>
+  </a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"/>
+  <img src="https://img.shields.io/badge/blender-4.0%2B-orange" alt="Blender 4.0+"/>
+  <img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="GPL-3.0"/>
 </p>
 
-OllamaToBlender remplace le client (Claude Cowork / Claude Code) du projet [`Oli97430/blender-mcp-addon`](https://github.com/Oli97430/blender-mcp-addon) par un client **100&nbsp;% local** avec une interface moderne, un installateur d'addon en un clic, et toute une chaîne de fiabilité (lint, auto-fix, vision, render preview).
+<p align="center">
+  🇫🇷 <a href="README.fr.md">Version française</a>
+</p>
 
 ---
 
-## Sommaire
+## Table of contents
 
-- [Aperçu](#aperçu)
-- [Fonctionnalités](#fonctionnalités)
-- [Installation rapide](#installation-rapide)
-  - [Option A — Exécutable Windows (zéro Python)](#option-a--exécutable-windows-zéro-python)
-  - [Option B — Source (Windows / macOS / Linux)](#option-b--source-windows--macos--linux)
-- [Premier lancement](#premier-lancement)
-- [Modèles recommandés (Q4_K_M)](#modèles-recommandés-q4_k_m)
+- [What it does](#what-it-does)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Recommended models](#recommended-models)
 - [Architecture](#architecture)
-- [Raccourcis clavier](#raccourcis-clavier)
-- [Réglages avancés](#réglages-avancés)
-- [Fichiers utilisateur](#fichiers-utilisateur)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Settings](#settings)
+- [User files](#user-files)
 - [Troubleshooting](#troubleshooting)
-- [Build & release (mainteneurs)](#build--release-mainteneurs)
-- [Licence](#licence)
+- [Build & release](#build--release)
+- [License](#license)
 
 ---
 
-## Aperçu
+## What it does
+
+OllamaToBlender is a modern desktop client (built with `customtkinter`) that replaces paid AI APIs as the brain behind [`blender-mcp-addon`](https://github.com/Oli97430/blender-mcp-addon). You describe what you want in plain language; the app asks a **local** Ollama model to write the `bpy` script, then executes it inside Blender over a TCP socket — all without a single byte leaving your machine.
 
 | | |
 |---|---|
-| **Sans cloud** | Tout tourne en local : pas de prompt envoyé à un serveur tiers, pas de quota, pas de clé d'API. |
-| **Sans installer manuellement le addon** | L'app détecte tes installations Blender et copie le `blender_mcp_addon.py` au bon endroit en un clic. |
-| **Auto-fix sur erreur** | Si Blender renvoie une exception, l'app re-soumet le code au modèle avec la traceback pour qu'il le corrige tout seul. |
-| **Render preview** | Toggle "Preview" : après chaque exécution, l'addon rend le viewport et l'app affiche la PNG inline. |
-| **Routing intelligent** | "List all materials" → prompt court (lecture seule). "Build a forest" → prompt complet (création). |
-| **Vision** | Quand un modèle vision-capable est sélectionné (`llava`, `qwen2.5-vl`, …), un bouton 📎 apparaît pour attacher une image de référence au prompt. |
-| **Coloration syntaxique** | `pygments` colore le code généré directement dans la fenêtre, et tu peux l'éditer avant `Run in Blender`. |
+| **No cloud** | Every token stays local. No quotas, no billing, no data leaks. |
+| **One-click addon install** | The app detects every Blender installation on your system and copies the addon for you. |
+| **Auto-fix on error** | When Blender raises an exception, the traceback is fed back to the model for a silent self-correction. |
+| **Blender 4.x hardened** | Hardened system prompt + runtime AST sanitizer that rewrites broken API calls before they hit Blender (BSDF socket renames, removed lamp types, `brushes.new()` signature change, …). |
+| **Vision support** | Attach a reference image when using a vision-capable model (`qwen2.5-vl`, `llava`, …). |
+| **Multilingual** | Full English / French UI — auto-detected from your OS locale. |
 
 ---
 
-## Fonctionnalités
+## Features
 
 ### Setup & onboarding
-- **Installateur d'addon intégré** : détecte automatiquement `%APPDATA%\Blender Foundation\Blender\<X.Y>\scripts\addons` (Windows), `~/Library/Application Support/Blender/...` (macOS), `~/.config/blender/...` (Linux + Snap + Flatpak). Source : GitHub Releases en direct, fallback bundle hors-ligne.
-- **Manage models** : list, switch, et `ollama pull` avec barre de progression.
-- **Status pills** temps réel pour Ollama et Blender, cliquables pour forcer un refresh.
-- **Update check** silencieux au démarrage (GitHub Releases). Toast si nouvelle version.
+- **Integrated addon installer** — auto-detects Blender data folders on Windows, macOS, Linux (including Snap and Flatpak). Downloads the latest release from GitHub; falls back to the bundled copy offline.
+- **Model manager** — list, switch, and `ollama pull` with a live progress bar, straight from the app.
+- **Live status pills** for Ollama and Blender (click to force a refresh).
+- **Silent update check** at startup — toast notification if a newer release exists on GitHub.
 
-### Chat & génération
-- Streaming token par token, **bouton Stop** + `Esc` pour interrompre.
-- **Code éditable** : tu peux ajuster le script avant de l'envoyer à Blender.
-- **Auto-run** optionnel : exécution immédiate après streaming.
-- **Auto-fix** : sur erreur, re-prompt automatique avec la traceback (configurable, max 1 tentative par défaut).
-- **Lint AST** avant envoi : les erreurs de syntaxe sont attrapées sans round-trip Blender.
-- **Preview viewport** inline (toggle).
-- **Stats par turn** : tokens, durée, tokens/s.
-- **Save .py** par turn, **Export** de la conversation entière en JSON.
-- **Régénération** d'un turn (`↻`).
-- **Historique persistant** entre sessions (auto, `~/.ollamatoblender/history.json`).
-- **Trimming d'historique** : au-delà du budget de tokens, les vieux turns sont automatiquement droppés.
-- **Routing dynamique** du system prompt (query vs build).
-- **Vision** (Ollama natif) : attache une image, elle part avec le prompt en base64.
-- **Timestamp** par turn.
+### Chat & code generation
+- **Token-by-token streaming** with a Stop button and `Esc` shortcut.
+- **Editable code** — tweak the generated script before sending it to Blender.
+- **Auto-run** toggle — execute immediately after streaming completes.
+- **Auto-fix loop** — on Blender error, automatically re-prompt with the traceback (configurable; 1 attempt by default).
+- **AST lint** before send — syntax errors are caught without a Blender round-trip.
+- **Render preview** — after execution, the addon renders the viewport and the app displays the PNG inline.
+- **Per-turn stats** — token count, elapsed time, tokens/s.
+- **Save `.py`** per turn; **export** the entire conversation as JSON.
+- **Regenerate** any turn (`↻`).
+- **Persistent history** across sessions (`~/.ollamatoblender/history.json`), with automatic token-budget trimming.
+- **Dynamic prompt routing** — short read-only system prompt for inspection queries, full creator prompt for build requests.
+- **Syntax highlighting** via Pygments, rendered inline in the turn card.
+- **Timestamp** on every turn.
 
-### Robustesse côté Blender
-- **Wrap automatique en `temp_override` VIEW_3D** complet (window + screen + area + region + scene + view_layer) → plus d'erreurs `Operator … context is incorrect`.
-- **Reset best-effort en mode `OBJECT`** avant exécution (évite les `select_all.poll() failed` quand un script précédent a laissé la scène en mode édition).
-- **Postamble render** opt-in qui capture le viewport, encode en base64, et stuffe le PNG dans `result["_otb_render"]`.
-
-### Quality of life
-- Tooltips partout, raccourcis clavier (`Ctrl+1..4`, `Ctrl+L`, `Ctrl+K`, `Ctrl+,`, `Esc`).
-- Thème sombre / clair / système.
-- Géométrie de fenêtre persistée.
-- Vue **Logs** (fichier sur disque + viewer in-app).
+### Blender reliability layer
+- **Automatic `temp_override` wrap** — every script runs inside a full `VIEW_3D` context override (window + screen + area + region + scene + view_layer). No more `Operator … context is incorrect` errors.
+- **Best-effort OBJECT mode reset** before execution — prevents stale edit-mode from breaking operator polls.
+- **Runtime AST sanitizer** — transparently rewrites known Blender 4.x API breakages:
+  - `bpy.data.brushes.new(..., tool=X)` → strips `tool=`, appends `brush.sculpt_tool = X`
+  - `tool='SCULPT'` used instead of `mode=` → renames the kwarg
+  - Missing `mode=` → injects `mode='SCULPT'` as a safe default
 
 ---
 
-## Installation rapide
+## Quick start
 
-### Option A — Exécutable Windows (zéro Python)
+### Option A — Windows executable (no Python required)
 
-1. Télécharge `OllamaToBlender.exe` depuis la dernière [GitHub Release](https://github.com/Oli97430/OllamaToBlender/releases/latest).
-2. Double-clique. Pas d'installateur, pas de venv, pas de Python à installer côté toi.
+1. Download `OllamaToBlender.exe` from the latest [GitHub Release](https://github.com/Oli97430/OllamaToBlender/releases/latest).
+2. Double-click. No installer, no virtual environment.
 
-### Option B — Source (Windows / macOS / Linux)
+### Option B — Run from source (Windows / macOS / Linux)
 
 ```bash
 git clone https://github.com/Oli97430/OllamaToBlender.git
 cd OllamaToBlender
 ```
 
-**Windows :**
+**Windows:**
 ```bat
 run.bat
 ```
 
-**macOS / Linux :**
+**macOS / Linux:**
 ```bash
-chmod +x run.sh
-./run.sh
+chmod +x run.sh && ./run.sh
 ```
 
-`run.bat` / `run.sh` créent un venv, installent les dépendances et lancent l'app. Manuellement :
+Both scripts create a virtual environment, install dependencies, and launch the app. Manual equivalent:
 
 ```bash
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-source .venv/bin/activate
+# Windows: .venv\Scripts\activate  |  macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
 
----
+### First run checklist
 
-## Premier lancement
-
-1. **Lance l'app** (`OllamaToBlender.exe` ou `python main.py`).
-2. **Onglet Setup** → l'app détecte tes installations Blender. Choisis-en une, clique **Install / Update addon**.
-3. **Démarre Ollama** : `ollama serve` (lancé automatiquement sur Windows / macOS).
-4. **Onglet Models** → choisis `qwen2.5-coder:7b` puis **Pull model** (~4.7 GB, Q4_K_M, recommandé). Ou en CLI :
-   ```bash
-   ollama pull qwen2.5-coder:7b
-   ```
-5. **Dans Blender** : Edit → Preferences → Add-ons, cherche "MCP Server" et coche-le. La N-Panel du 3D Viewport montre les contrôles du serveur.
-6. **Reviens à l'onglet Chat** : les deux pastilles (Ollama, Blender) doivent passer au vert.
-7. Tape une requête, par exemple :
-
-   > Build a stylised studio scene: a wood floor, a glass icosphere, and a 3-point lighting rig
+1. **Setup tab** → select your Blender installation → click **Install / Update addon**.
+2. Start Ollama: `ollama serve` (auto-started on Windows and macOS).
+3. **Models tab** → select `qwen2.5-coder:7b` → click **Pull model** (~4.7 GB).  
+   Or via CLI: `ollama pull qwen2.5-coder:7b`
+4. **In Blender**: Edit → Preferences → Add-ons → search "MCP Server" → enable it. Start the server from the N-Panel in the 3D Viewport.
+5. Back in the app, both status pills (Ollama, Blender) should turn green.
+6. Type a request in the Chat tab and press `Ctrl+Enter`.
 
 ---
 
-## Modèles recommandés (Q4_K_M)
+## Recommended models
 
-> **Q4_K_M** = quantization 4 bits, K-means, M = medium. C'est le compromis qualité / mémoire que `ollama pull <name>` choisit par défaut.
+> **Q4_K_M** — 4-bit K-means quantization, medium size. The default quality/VRAM sweet spot for code models.
 
-| Modèle | VRAM | Note |
+| Model | VRAM | Notes |
 |---|---|---|
-| `qwen2.5-coder:7b` | ~5 GB | **Défaut** — meilleur rapport qualité/taille pour du code |
-| `qwen2.5-coder:14b` | ~9 GB | Plus précis sur les requêtes complexes |
-| `qwen2.5-coder:3b` | ~2 GB | GPU léger / CPU |
-| `deepseek-coder-v2:16b` | ~9 GB | Alternative très solide |
-| `codellama:13b` | ~7 GB | Le classique |
-| `llama3.1:8b` | ~5 GB | Généraliste |
-| `qwen2.5-vl:7b` *(vision)* | ~6 GB | Pour attacher des images au prompt |
-| `llava:7b` *(vision)* | ~5 GB | Vision alternative |
-
-L'onglet **Models** propose ces presets en un clic.
+| `qwen2.5-coder:7b` | ~5 GB | **Default** — best quality/size for `bpy` code |
+| `qwen2.5-coder:14b` | ~9 GB | Sharper on complex multi-step tasks |
+| `qwen2.5-coder:3b` | ~2 GB | Lightweight GPU or CPU-only |
+| `deepseek-coder-v2:16b` | ~9 GB | Strong alternative |
+| `codellama:13b` | ~7 GB | The classic |
+| `llama3.1:8b` | ~5 GB | General-purpose |
+| `qwen2.5-vl:7b` *(vision)* | ~6 GB | Attach images to the prompt |
+| `llava:7b` *(vision)* | ~5 GB | Alternative vision model |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────┐   prompt    ┌────────────┐   bpy code    ┌──────────────────┐
-│ OllamaToBlender │ ──────────► │   Ollama   │ ────────────► │ blender-mcp-addon│
-│   (cette app)   │ ◄────────── │  (local)   │               │   (port 9876)    │
-└─────────────────┘   tokens    └────────────┘               └──────────────────┘
-        ▲                                                            │
-        └──────────── stdout / result / render / error  ◄────────────┘
+┌─────────────────────┐  prompt   ┌───────────┐  bpy script  ┌─────────────────────┐
+│  OllamaToBlender    │ ────────► │  Ollama   │ ──────────►  │  blender-mcp-addon  │
+│     (this app)      │ ◄──────── │  (local)  │              │    (port 9876)      │
+└─────────────────────┘  tokens   └───────────┘              └─────────────────────┘
+          ▲                                                           │
+          └────────── stdout / result / render PNG / error  ◄─────────┘
 ```
 
-| Module | Rôle |
+| Module | Role |
 |---|---|
-| `core/ollama_client.py` | Client HTTP streaming (`/api/chat`, `/api/pull`, `/api/tags`) + token budget + vision detection |
-| `core/blender_client.py` | Client TCP du addon, wrap auto VIEW_3D + render postamble |
-| `core/system_prompt.py` | Deux prompts (creator / query) + routeur d'intention |
-| `core/lint.py` | Pré-flight `ast.parse` |
-| `core/addon_installer.py` | Détection des dossiers Blender + download GitHub avec fallback bundle |
-| `core/updater.py` | Check des releases GitHub |
-| `core/settings.py` | Persistance JSON des réglages |
-| `gui/app.py` | Fenêtre principale (sidebar + vues) |
-| `gui/chat_turn.py` | Carte d'échange (prompt / streaming / code / résultat / preview) |
-| `gui/widgets.py` | StatusPill, CodeView (avec coloration), Toast, Tooltip, InlineImage, IconButton |
-| `gui/theme.py` | Tokens de design (couleurs, radii, fonts, scales) |
-| `assets/blender_mcp_addon.py` | Bundle hors-ligne du addon |
-| `assets/make_logo.py` | Génère logo PNG / ICO |
+| `core/ollama_client.py` | HTTP streaming client (`/api/chat`, `/api/tags`, `/api/pull`), token budget, vision detection |
+| `core/blender_client.py` | TCP client, `temp_override` wrap, render postamble, AST sanitizer |
+| `core/system_prompt.py` | Creator & query prompts, Blender 4.x rules, intent router |
+| `core/lint.py` | Pre-flight `ast.parse` lint |
+| `core/addon_installer.py` | Multi-OS Blender folder detection, GitHub download, offline fallback |
+| `core/updater.py` | GitHub Releases update check |
+| `core/i18n.py` | EN / FR translation table, auto OS-locale detection |
+| `core/settings.py` | JSON settings persistence |
+| `gui/app.py` | Main window — sidebar with Chat / Setup / Models / Settings / Logs / About tabs |
+| `gui/chat_turn.py` | Turn card — streaming dot animation, editable CodeView, stats, inline preview |
+| `gui/widgets.py` | `CodeView` (Pygments), `StatusPill`, `Toast`, `Tooltip`, `InlineImage`, `IconButton` |
+| `gui/theme.py` | Design tokens (colors, fonts, radii, scales) |
+| `assets/blender_mcp_addon.py` | Offline-bundled addon |
 
 ---
 
-## Raccourcis clavier
+## Keyboard shortcuts
 
-| Action | Raccourci |
+| Action | Shortcut |
 |---|---|
-| Envoyer le prompt | `Ctrl+Enter` |
-| Arrêter le streaming | `Esc` |
-| Vider la conversation | `Ctrl+L` |
-| Focus sur le prompt | `Ctrl+K` |
-| Ouvrir Settings | `Ctrl+,` |
-| Onglet Chat / Setup / Models / Logs | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` / `Ctrl+4` |
+| Send prompt | `Ctrl+Enter` |
+| Stop streaming | `Esc` |
+| Clear conversation | `Ctrl+L` |
+| Focus prompt input | `Ctrl+K` |
+| Open Settings | `Ctrl+,` |
+| Switch to Chat / Setup / Models / Logs | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` / `Ctrl+4` |
 
 ---
 
-## Réglages avancés
+## Settings
 
-Onglet **Settings** :
+All settings live in the **Settings tab**:
 
-| Section | Réglage |
+| Section | Options |
 |---|---|
-| Ollama | Endpoint, température, keep-alive |
+| Ollama | Endpoint URL, temperature, keep-alive duration |
 | Blender | Host, port, "Test connection" |
 | Behaviour | Persist history, auto-route prompt, check for updates, max history tokens, auto-fix attempts |
-| Appearance | Thème dark / light / system |
+| Appearance | Dark / light / system theme, language (Auto / English / Français) |
 
-Toggles inline dans la barre de chat :
-- **Auto-run** — exécute automatiquement le code après streaming
-- **Auto-fix** — re-soumet sur erreur Blender
-- **Preview** — rend le viewport après exécution
+Inline toggles in the chat bar:
+
+| Toggle | Effect |
+|---|---|
+| **Auto-run** | Execute code immediately after streaming |
+| **Auto-fix** | Re-submit to the model on Blender error |
+| **Preview** | Render the viewport after execution |
 
 ---
 
-## Fichiers utilisateur
+## User files
 
-Tous stockés sous `~/.ollamatoblender/` :
+Everything lives under `~/.ollamatoblender/` — no registry, no hidden folders elsewhere.
 
 ```
 ~/.ollamatoblender/
-├── settings.json     # réglages persistants
-├── history.json      # conversation entre sessions (toggle)
-└── events.log        # journal des évènements (vue Logs)
+├── settings.json     # persistent app settings
+├── history.json      # conversation history (if enabled)
+└── events.log        # event log (visible in the Logs tab)
 ```
 
-Aucune télémétrie. Aucun fichier en dehors de ce dossier.
+No telemetry. No network calls except to your local Ollama instance and GitHub's release API (update check, opt-out in Settings).
 
 ---
 
 ## Troubleshooting
 
-| Symptôme | Solution |
+| Symptom | Fix |
 |---|---|
-| Pastille **Ollama offline** | `ollama serve`, ou vérifier l'URL dans Settings. |
-| Pastille **Blender offline** | Le addon n'est pas démarré. Onglet Setup → install. Sinon : Edit → Preferences → Add-ons → coche "MCP Server". |
-| `Operator … context is incorrect` | Re-essaye : le wrap auto + le reset de mode devraient passer maintenant. Sinon, ouvre l'onglet Logs. |
-| `KeyError: 'Principled BSDF' not found` | Le system prompt teach maintenant le pattern robuste. Régénère via `↻`. |
-| Modèle qui hallucine sur l'API `bpy` | Préfère `qwen2.5-coder:7b` ou `:14b`. Les modèles non-code sont plus faibles. Baisse la température à 0.1. |
-| L'app ne démarre pas | `python main.py` en console pour voir la traceback ; vérifier `pip install -r requirements.txt`. |
-| Conversation trop longue / lente | Réduis `Max history tokens` dans Settings ou clique **Clear** (`Ctrl+L`). |
+| **Ollama** pill stays red | Run `ollama serve`, or check the URL in Settings. |
+| **Blender** pill stays red | The addon isn't started. Go to Setup tab → Install. Then enable it in Blender: Edit → Preferences → Add-ons → "MCP Server". |
+| `Operator … context is incorrect` | Should be auto-handled by the VIEW_3D wrap. If it persists, check the Logs tab for details. |
+| `KeyError: 'Principled BSDF'` | Regenerate the turn (`↻`). The system prompt teaches the robust BSDF lookup pattern. |
+| `TypeError: brushes.new() tool=…` | Fixed automatically by the runtime AST sanitizer since v1.1.2. Update the app if you see this. |
+| Model hallucinates `bpy` calls | Use `qwen2.5-coder:7b` or `:14b`. Lower temperature to `0.1`. |
+| App won't start | Run `python main.py` in a terminal to see the traceback. Check `pip install -r requirements.txt`. |
+| Conversation too slow | Reduce **Max history tokens** in Settings or clear with `Ctrl+L`. |
 
 ---
 
-## Build & release (mainteneurs)
+## Build & release
 
-### Construire l'exe Windows
+### Build the Windows exe
 
 ```bat
 build.bat
 ```
 
-Crée `dist\OllamaToBlender.exe` (single-file, windowed, icône Windows). Sous macOS / Linux :
+Produces `dist\OllamaToBlender.exe` (single-file, windowed, custom icon). On macOS / Linux:
 
 ```bash
 ./build.sh
 ```
 
-### Publier une release
+### Publish a release
 
 ```bash
-# Tag the release locally
-git tag v1.0.0 && git push --tags
+git tag -a v1.x.y -m "vX.Y.Z — description"
+git push origin main && git push origin v1.x.y
 
-# Create the GitHub release with the exe attached
-gh release create v1.0.0 dist/OllamaToBlender.exe \
-    --title "OllamaToBlender v1.0.0" \
-    --notes-file CHANGELOG.md
+gh release create v1.x.y dist/OllamaToBlender.exe \
+    --title "vX.Y.Z — Short description" \
+    --notes "Changelog here"
 ```
 
-L'auto-update check de l'app interroge `https://api.github.com/repos/Oli97430/OllamaToBlender/releases/latest` et compare le `tag_name` avec `APP_VERSION` (dans `gui/app.py`). Si plus récent → toast + lien dans About.
+The in-app update checker queries `https://api.github.com/repos/Oli97430/OllamaToBlender/releases/latest` and compares `tag_name` against `APP_VERSION` in `gui/app.py`. If a newer release exists, a toast appears with a link to the release page.
 
 ---
 
-## Licence
+## License
 
-GPL-3.0-or-later — pour rester compatible avec l'addon Blender et l'écosystème upstream.
+[GPL-3.0-or-later](LICENSE) — to stay compatible with the blender-mcp-addon and the upstream Blender ecosystem.
