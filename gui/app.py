@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import io
+import queue
 import re
 import threading
 import time
@@ -29,6 +30,7 @@ from core import (
     UpdateInfo,
     available_languages,
     check_for_update,
+    estimate_history_tokens,
     find_blender_addon_dirs,
     install_addon,
     lint_python,
@@ -56,7 +58,7 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 class OllamaToBlenderApp(ctk.CTk):
     APP_TITLE = "OllamaToBlender"
-    APP_VERSION = "1.2.0"
+    APP_VERSION = "1.3.0"
 
     def __init__(self) -> None:
         super().__init__()
@@ -96,6 +98,8 @@ class OllamaToBlenderApp(ctk.CTk):
         self._attached_image_b64: str | None = None
         self._attached_image_thumb: ctk.CTkImage | None = None
         self._scroll_scheduled: bool = False
+        self._blender_queue: queue.Queue[tuple[ChatTurn, str]] = queue.Queue()
+        threading.Thread(target=self._blender_queue_worker, daemon=True).start()
 
         self._build_layout()
         self.show_view("chat")
@@ -277,7 +281,7 @@ class OllamaToBlenderApp(ctk.CTk):
             scrollbar_button_color=T.BG_RAISED,
             scrollbar_button_hover_color=T.EDGE,
         )
-        self.history_frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=(0, 8))
+        self.history_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(0, 8))
 
         self._build_empty_state()
 
@@ -354,6 +358,13 @@ class OllamaToBlenderApp(ctk.CTk):
         )
         render_chk.pack(side="left", padx=(12, 0))
         attach_tooltip(render_chk, t("chat.btn.preview.tooltip"))
+
+        # Token budget indicator
+        self._token_label = ctk.CTkLabel(
+            ctrl, text="", text_color=T.INK_DIM, font=(T.FONT_MONO, 11),
+        )
+        self._token_label.pack(side="right", padx=(8, 0))
+        attach_tooltip(self._token_label, t("chat.token_budget.tooltip"))
 
         ctk.CTkLabel(
             ctrl, text=t("chat.hint.send"), text_color=T.INK_DIM, font=(T.FONT_FAMILY, 12)
@@ -484,6 +495,7 @@ class OllamaToBlenderApp(ctk.CTk):
             on_delete=self._on_delete_turn,
             image_b64=image_b64,
         )
+        turn._on_edit_callback = self._on_edit_turn  # type: ignore[attr-defined]
         turn._fix_attempts = fix_attempt  # type: ignore[attr-defined]
         turn.pack(fill="x", pady=(2, 0))
         self._chat_turns.append(turn)
@@ -515,6 +527,21 @@ class OllamaToBlenderApp(ctk.CTk):
         full: list[str] = []
         # Pick the appropriate system prompt (creator vs query)
         sys_prompt = pick_system_prompt(user_msg) if self.settings.auto_route_prompt else SYSTEM_PROMPT
+        prompt_mode = "query" if (self.settings.auto_route_prompt and sys_prompt != SYSTEM_PROMPT) else "creator"
+        self.after(0, lambda m=prompt_mode: turn.set_prompt_mode(m))
+
+        # Inject scene context so the model knows what exists
+        if self.settings.inject_scene_context:
+            try:
+                scene_result = self.blender.execute(
+                    "result = [o.name + ' (' + o.type + ')' for o in __import__('bpy').data.objects]",
+                    timeout=3.0,
+                )
+                if scene_result.ok and scene_result.result:
+                    sys_prompt += f"\n\nCURRENT SCENE OBJECTS: {scene_result.result}"
+            except Exception:
+                pass
+
         # Trim history down to the configured token budget
         kept, dropped = trim_history(
             self._convo_history,
@@ -530,6 +557,7 @@ class OllamaToBlenderApp(ctk.CTk):
                 messages=messages,
                 temperature=self.settings.temperature,
                 keep_alive=self.settings.keep_alive,
+                num_ctx=self.settings.num_ctx,
                 stop_event=stop_event,
                 stats=stats,
             ):
@@ -562,23 +590,47 @@ class OllamaToBlenderApp(ctk.CTk):
         ):
             self.after(120, self._on_run_turn, turn)
 
+    def _update_token_label(self) -> None:
+        """Refresh the token budget indicator near the prompt."""
+        try:
+            used = estimate_history_tokens(self._convo_history)
+            budget = self.settings.max_history_tokens
+            self._token_label.configure(text=f"{used:,} / {budget:,} tok")
+        except Exception:
+            pass
+
     def _mark_idle(self) -> None:
         self._stop_event = None
         self._active_turn = None
         self._save_history_async()
+        self.after(0, self._update_token_label)
 
     def _on_run_turn(self, turn: ChatTurn) -> None:
         code = turn.code_view.get_code() if turn.code else ""
         if not code.strip():
             return
         turn.set_blender_running()
-        threading.Thread(target=self._exec_in_blender, args=(turn, code), daemon=True).start()
+        self._blender_queue.put((turn, code))
+
+    def _blender_queue_worker(self) -> None:
+        """Serialize Blender executions so concurrent Run clicks don't race."""
+        while True:
+            turn, code = self._blender_queue.get()
+            try:
+                self._exec_in_blender(turn, code)
+            except Exception:
+                pass
+            self._blender_queue.task_done()
 
     def _exec_in_blender(self, turn: ChatTurn, code: str) -> None:
         # Pre-flight lint — catch syntax errors before paying a Blender round-trip
         issues = lint_python(code)
-        if issues:
-            msg = "Syntax check failed:\n" + "\n".join(i.format() for i in issues)
+        errors = [i for i in issues if i.level == "error"]
+        warns = [i for i in issues if i.level == "warn"]
+        if warns:
+            self._log(f"lint warnings: {'; '.join(w.format() for w in warns)}")
+        if errors:
+            msg = "Syntax check failed:\n" + "\n".join(i.format() for i in errors)
             payload = {"result": None, "stdout": "", "message": msg}
             self.after(0, turn.set_blender_result, "error", payload)
             self.after(0, lambda: self._log(f"lint failure: {msg}"))
@@ -635,6 +687,14 @@ class OllamaToBlenderApp(ctk.CTk):
                 self._convo_history.pop(i)
                 break
         self._submit_prompt(prompt)
+
+    def _on_edit_turn(self, turn: ChatTurn) -> None:
+        """Edit-and-resubmit: fill the prompt box with the turn's text."""
+        self._clear_placeholder()
+        self.prompt_entry.delete("1.0", "end")
+        self.prompt_entry.insert("1.0", turn.prompt)
+        self.prompt_entry.focus_set()
+        self.show_view("chat")
 
     def _on_delete_turn(self, turn: ChatTurn) -> None:
         """Remove a single turn from the conversation."""
@@ -1370,11 +1430,23 @@ class OllamaToBlenderApp(ctk.CTk):
         chk3.pack(anchor="w", padx=14, pady=(0, 4))
         attach_tooltip(chk3, t("settings.updates.tooltip"))
 
-        # Numeric: max history tokens, max fix attempts
+        self.s_scene_ctx = ctk.BooleanVar(value=self.settings.inject_scene_context)
+        chk4 = ctk.CTkCheckBox(
+            sect, text="Inject scene context",
+            variable=self.s_scene_ctx,
+            text_color=T.INK_MUTED, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
+            border_color=T.EDGE, font=(T.FONT_FAMILY, 13),
+        )
+        chk4.pack(anchor="w", padx=14, pady=(0, 4))
+        attach_tooltip(chk4, "Send the list of scene objects to the model before each prompt")
+
+        # Numeric: max history tokens, max fix attempts, num_ctx
         self.s_max_hist = self._setting_row(sect, "Max history tokens", str(self.settings.max_history_tokens),
                                             tooltip="Older messages are dropped when the conversation exceeds this budget")
         self.s_max_fix = self._setting_row(sect, "Auto-fix attempts", str(self.settings.max_fix_attempts),
                                             tooltip="Maximum number of automatic correction rounds per turn")
+        self.s_num_ctx = self._setting_row(sect, "Context window (num_ctx)", str(self.settings.num_ctx),
+                                            tooltip="Token context size sent to Ollama — increase for large prompts, decrease to save VRAM")
         ctk.CTkLabel(sect, text="").pack(pady=(0, 8))
 
         # --- Appearance
@@ -1495,6 +1567,8 @@ class OllamaToBlenderApp(ctk.CTk):
             self.settings.check_for_updates = bool(self.s_updates.get())
             self.settings.max_history_tokens = max(512, int(self.s_max_hist.get().strip() or 8000))
             self.settings.max_fix_attempts = max(0, int(self.s_max_fix.get().strip() or 1))
+            self.settings.num_ctx = max(2048, int(self.s_num_ctx.get().strip() or 8192))
+            self.settings.inject_scene_context = bool(self.s_scene_ctx.get())
         except ValueError as exc:
             Toast(self, t("toast.invalid_value", error=str(exc)), kind="err")
             return
@@ -1764,6 +1838,7 @@ class OllamaToBlenderApp(ctk.CTk):
                 on_stop=self._on_stop_turn,
                 on_delete=self._on_delete_turn,
             )
+            turn._on_edit_callback = self._on_edit_turn
             turn.pack(fill="x", pady=(2, 0))
             self._chat_turns.append(turn)
             stats = StreamStats()

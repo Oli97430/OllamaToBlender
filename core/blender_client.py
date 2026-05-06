@@ -104,30 +104,90 @@ class _BrushApiFixer(ast.NodeTransformer):
 
 
 _BRUSH_TOOL_RE = re.compile(r"brushes\s*\.\s*new\s*\([^)]*\btool\s*=")
+_EXPORT_OBJ_RE = re.compile(r"bpy\.ops\.export_scene\.obj\s*\(")
+_IMPORT_OBJ_RE = re.compile(r"bpy\.ops\.import_scene\.obj\s*\(")
+_LIGHT_ADD_HEMI_RE = re.compile(r"light_add\s*\([^)]*type\s*=\s*['\"]HEMI['\"]")
+_BSDF_BY_NAME_RE = re.compile(r"""nodes\s*\[\s*["']Principled BSDF["']\s*\]""")
+_MATHUTILS_RADIANS_RE = re.compile(r"\bmathutils\.(radians|degrees)\b")
+
+
+def _auto_inject_import_bpy(code: str) -> str:
+    """Prepend `import bpy` if code references `bpy` but never imports it."""
+    if re.search(r"^\s*import\s+bpy\b", code, re.MULTILINE):
+        return code
+    if "bpy." in code or "bpy " in code:
+        return "import bpy\n" + code
+    return code
+
+
+def _fix_export_obj(code: str) -> str:
+    """Replace removed `bpy.ops.export_scene.obj(...)` with `bpy.ops.wm.obj_export(...)`."""
+    return _EXPORT_OBJ_RE.sub("bpy.ops.wm.obj_export(", code)
+
+
+def _fix_import_obj(code: str) -> str:
+    """Replace removed `bpy.ops.import_scene.obj(...)` with `bpy.ops.wm.obj_import(...)`."""
+    return _IMPORT_OBJ_RE.sub("bpy.ops.wm.obj_import(", code)
+
+
+def _fix_light_hemi(code: str) -> str:
+    """Replace `type='HEMI'` with `type='AREA'` in light_add calls."""
+    return _LIGHT_ADD_HEMI_RE.sub(
+        lambda m: m.group(0).replace("HEMI", "AREA"), code
+    )
+
+
+def _fix_bsdf_by_name(code: str) -> str:
+    """Replace `nodes["Principled BSDF"]` with the type-based lookup."""
+    return _BSDF_BY_NAME_RE.sub(
+        "next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)", code
+    )
+
+
+def _fix_mathutils_radians(code: str) -> str:
+    """Replace `mathutils.radians(…)` / `mathutils.degrees(…)` with `math.*`.
+
+    `mathutils` does not have `radians`/`degrees` — they live in the stdlib `math` module.
+    Models confuse the two because both are imported together in typical Blender scripts.
+    Also auto-injects `import math` if missing.
+    """
+    if not _MATHUTILS_RADIANS_RE.search(code):
+        return code
+    code = _MATHUTILS_RADIANS_RE.sub(lambda m: f"math.{m.group(1)}", code)
+    # Ensure `import math` is present
+    if not re.search(r"^\s*import\s+math\b", code, re.MULTILINE):
+        code = "import math\n" + code
+    return code
 
 
 def sanitize_code(code: str) -> str:
     """Best-effort rewrite of known-bad Blender 4+ API patterns.
 
-    Currently fixes: `bpy.data.brushes.new(..., tool=X)` → drops the kwarg
-    and (when assigned) appends `target.sculpt_tool = X`.
-
-    Only runs the AST transform when a problematic pattern is actually
-    detected via regex — this avoids `ast.unparse` stripping comments and
-    reformatting user-edited code when no fix is needed.
+    Applies, in order:
+    1. Auto-inject `import bpy` if missing.
+    2. Regex-based rewrites (export_scene.obj → wm.obj_export,
+       import_scene.obj → wm.obj_import, HEMI → AREA,
+       nodes["Principled BSDF"] → type-based lookup,
+       mathutils.radians/degrees → math.radians/degrees).
+    3. AST-based brush fixer (only when `brushes.new(tool=…)` detected).
     """
-    if not _BRUSH_TOOL_RE.search(code):
-        return code
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        return code
-    tree = _BrushApiFixer().visit(tree)
-    ast.fix_missing_locations(tree)
-    try:
-        return ast.unparse(tree)
-    except Exception:
-        return code
+    code = _auto_inject_import_bpy(code)
+    code = _fix_export_obj(code)
+    code = _fix_import_obj(code)
+    code = _fix_light_hemi(code)
+    code = _fix_bsdf_by_name(code)
+    code = _fix_mathutils_radians(code)
+
+    # AST pass — only when needed (ast.unparse strips comments)
+    if _BRUSH_TOOL_RE.search(code):
+        try:
+            tree = ast.parse(code)
+            tree = _BrushApiFixer().visit(tree)
+            ast.fix_missing_locations(tree)
+            code = ast.unparse(tree)
+        except (SyntaxError, Exception):
+            pass
+    return code
 
 
 @dataclass
@@ -263,6 +323,7 @@ class BlenderClient:
         *,
         auto_v3d: bool = True,
         with_render: bool = False,
+        retries: int = 3,
     ) -> BlenderResult:
         code = sanitize_code(code)
         if with_render:
@@ -270,29 +331,41 @@ class BlenderClient:
         elif auto_v3d:
             code = wrap_with_view3d_override(code)
         payload = json.dumps({"type": "execute", "code": code, "strict_json": False})
-        try:
-            with socket.create_connection((self.host, self.port), timeout=timeout or self.timeout) as sock:
-                sock.settimeout(timeout or self.timeout)
-                sock.sendall(payload.encode("utf-8") + b"\x00")
-                buf = bytearray()
-                while True:
-                    chunk = sock.recv(8192)
-                    if not chunk:
-                        break
-                    buf.extend(chunk)
-                    if len(buf) > MAX_RESPONSE_SIZE:
-                        raise OSError(f"Response exceeded {MAX_RESPONSE_SIZE // (1024*1024)} MB limit")
-                    if b"\x00" in chunk:
-                        break
-            raw = bytes(buf).rstrip(b"\x00").decode("utf-8", errors="replace")
-            data = json.loads(raw) if raw else {}
-            return BlenderResult(
-                status=data.get("status", "error"),
-                result=data.get("result"),
-                stdout=data.get("stdout", ""),
-                message=data.get("message", ""),
-            )
-        except (ConnectionRefusedError, socket.timeout, OSError) as exc:
-            return BlenderResult(status="transport_error", message=f"{type(exc).__name__}: {exc}")
-        except json.JSONDecodeError as exc:
-            return BlenderResult(status="transport_error", message=f"Invalid JSON from Blender: {exc}")
+
+        backoff = 1.0
+        last_exc: Exception | None = None
+        for attempt in range(max(1, retries)):
+            try:
+                with socket.create_connection((self.host, self.port), timeout=timeout or self.timeout) as sock:
+                    sock.settimeout(timeout or self.timeout)
+                    sock.sendall(payload.encode("utf-8") + b"\x00")
+                    buf = bytearray()
+                    while True:
+                        chunk = sock.recv(8192)
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                        if len(buf) > MAX_RESPONSE_SIZE:
+                            raise OSError(f"Response exceeded {MAX_RESPONSE_SIZE // (1024*1024)} MB limit")
+                        if b"\x00" in chunk:
+                            break
+                raw = bytes(buf).rstrip(b"\x00").decode("utf-8", errors="replace")
+                data = json.loads(raw) if raw else {}
+                return BlenderResult(
+                    status=data.get("status", "error"),
+                    result=data.get("result"),
+                    stdout=data.get("stdout", ""),
+                    message=data.get("message", ""),
+                )
+            except ConnectionRefusedError as exc:
+                last_exc = exc
+                if attempt < retries - 1:
+                    import time
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 15.0)
+                    continue
+            except (socket.timeout, OSError) as exc:
+                return BlenderResult(status="transport_error", message=f"{type(exc).__name__}: {exc}")
+            except json.JSONDecodeError as exc:
+                return BlenderResult(status="transport_error", message=f"Invalid JSON from Blender: {exc}")
+        return BlenderResult(status="transport_error", message=f"ConnectionRefusedError after {retries} attempts: {last_exc}")

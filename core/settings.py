@@ -32,6 +32,8 @@ class Settings:
     auto_render_preview: bool = False
     max_history_tokens: int = 8000
     auto_route_prompt: bool = True
+    num_ctx: int = 8192
+    inject_scene_context: bool = True
 
     # Update check
     check_for_updates: bool = True

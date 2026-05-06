@@ -49,7 +49,7 @@ OllamaToBlender is a modern desktop client (built with `customtkinter`) that rep
 | **No cloud** | Every token stays local. No quotas, no billing, no data leaks. |
 | **One-click addon install** | The app detects every Blender installation on your system and copies the addon for you. |
 | **Auto-fix on error** | When Blender raises an exception, the traceback is fed back to the model for a silent self-correction. |
-| **Blender 4.x hardened** | Hardened system prompt + runtime AST sanitizer that rewrites broken API calls before they hit Blender (BSDF socket renames, removed lamp types, `brushes.new()` signature change, …). |
+| **Blender 4.x hardened** | Hardened system prompt + runtime AST sanitizer that rewrites broken API calls before they hit Blender (BSDF socket renames, removed lamp types, `brushes.new()` signature change, OBJ import/export, `mathutils.radians`, …). |
 | **Vision support** | Attach a reference image when using a vision-capable model (`qwen2.5-vl`, `llava`, …). |
 | **Multilingual** | Full English / French UI — auto-detected from your OS locale. |
 
@@ -59,7 +59,7 @@ OllamaToBlender is a modern desktop client (built with `customtkinter`) that rep
 
 ### Setup & onboarding
 - **Integrated addon installer** — auto-detects Blender data folders on Windows, macOS, Linux (including Snap and Flatpak). Downloads the latest release from GitHub; falls back to the bundled copy offline.
-- **Model manager** — list, switch, and `ollama pull` with a live progress bar, straight from the app.
+- **Model manager** — list, switch, and `ollama pull` with a live progress bar and cancel button, straight from the app.
 - **Live status pills** for Ollama and Blender (click to force a refresh).
 - **Silent update check** at startup — toast notification if a newer release exists on GitHub.
 
@@ -72,19 +72,30 @@ OllamaToBlender is a modern desktop client (built with `customtkinter`) that rep
 - **Render preview** — after execution, the addon renders the viewport and the app displays the PNG inline.
 - **Per-turn stats** — token count, elapsed time, tokens/s.
 - **Save `.py`** per turn; **export** the entire conversation as JSON.
-- **Regenerate** any turn (`↻`).
+- **Regenerate** (`↻`), **edit & resubmit** (`✎`), **copy** (`📋`) and **delete** (`🗑`) per turn.
+- **Collapsible turns** — click any response header to collapse/expand.
 - **Persistent history** across sessions (`~/.ollamatoblender/history.json`), with automatic token-budget trimming.
+- **Token budget indicator** — shows live `used / budget tok` near the prompt.
 - **Dynamic prompt routing** — short read-only system prompt for inspection queries, full creator prompt for build requests.
+- **Scene context injection** — queries Blender for the current object list before each prompt, so the model knows what exists.
 - **Syntax highlighting** via Pygments, rendered inline in the turn card.
-- **Timestamp** on every turn.
+- **Timestamp & prompt mode badge** on every turn.
 
 ### Blender reliability layer
 - **Automatic `temp_override` wrap** — every script runs inside a full `VIEW_3D` context override (window + screen + area + region + scene + view_layer). No more `Operator … context is incorrect` errors.
 - **Best-effort OBJECT mode reset** before execution — prevents stale edit-mode from breaking operator polls.
+- **Serialized execution queue** — concurrent Run clicks are serialized so they don't race on the TCP port.
+- **TCP retry with exponential backoff** — 3 attempts on `ConnectionRefusedError` (1s → 2s → 4s).
 - **Runtime AST sanitizer** — transparently rewrites known Blender 4.x API breakages:
   - `bpy.data.brushes.new(..., tool=X)` → strips `tool=`, appends `brush.sculpt_tool = X`
   - `tool='SCULPT'` used instead of `mode=` → renames the kwarg
   - Missing `mode=` → injects `mode='SCULPT'` as a safe default
+  - `bpy.ops.export_scene.obj(...)` → `bpy.ops.wm.obj_export(...)` (removed in 4.0)
+  - `bpy.ops.import_scene.obj(...)` → `bpy.ops.wm.obj_import(...)` (removed in 4.0)
+  - `light_add(type='HEMI')` → `type='AREA'` (HEMI removed)
+  - `nodes["Principled BSDF"]` → type-based lookup (locale-independent)
+  - `mathutils.radians(...)` / `mathutils.degrees(...)` → `math.radians(...)` / `math.degrees(...)`
+  - Auto-injects `import bpy` and `import math` when missing
 
 ---
 
@@ -146,6 +157,7 @@ python main.py
 | `codellama:13b` | ~7 GB | The classic |
 | `llama3.1:8b` | ~5 GB | General-purpose |
 | `qwen2.5-vl:7b` *(vision)* | ~6 GB | Attach images to the prompt |
+| `qwen2.5-vl:32b` *(vision)* | ~20 GB | Best vision model for 24 GB VRAM users |
 | `llava:7b` *(vision)* | ~5 GB | Alternative vision model |
 
 ---
@@ -164,15 +176,15 @@ python main.py
 | Module | Role |
 |---|---|
 | `core/ollama_client.py` | HTTP streaming client (`/api/chat`, `/api/tags`, `/api/pull`), token budget, vision detection |
-| `core/blender_client.py` | TCP client, `temp_override` wrap, render postamble, AST sanitizer |
+| `core/blender_client.py` | TCP client, `temp_override` wrap, render postamble, AST sanitizer (7 rewrite rules) |
 | `core/system_prompt.py` | Creator & query prompts, Blender 4.x rules, intent router |
-| `core/lint.py` | Pre-flight `ast.parse` lint |
+| `core/lint.py` | Pre-flight `ast.parse` lint + semantic pattern warnings |
 | `core/addon_installer.py` | Multi-OS Blender folder detection, GitHub download, offline fallback |
 | `core/updater.py` | GitHub Releases update check |
 | `core/i18n.py` | EN / FR translation table, auto OS-locale detection |
 | `core/settings.py` | JSON settings persistence |
 | `gui/app.py` | Main window — sidebar with Chat / Setup / Models / Settings / Logs / About tabs |
-| `gui/chat_turn.py` | Turn card — streaming dot animation, editable CodeView, stats, inline preview |
+| `gui/chat_turn.py` | Turn card — streaming dot animation, editable CodeView, collapsible, stats, inline preview |
 | `gui/widgets.py` | `CodeView` (Pygments), `StatusPill`, `Toast`, `Tooltip`, `InlineImage`, `IconButton` |
 | `gui/theme.py` | Design tokens (colors, fonts, radii, scales) |
 | `assets/blender_mcp_addon.py` | Offline-bundled addon |
@@ -200,7 +212,7 @@ All settings live in the **Settings tab**:
 |---|---|
 | Ollama | Endpoint URL, temperature, keep-alive duration |
 | Blender | Host, port, "Test connection" |
-| Behaviour | Persist history, auto-route prompt, check for updates, max history tokens, auto-fix attempts |
+| Behaviour | Persist history, auto-route prompt, scene context injection, check for updates, context window (num_ctx), max history tokens, auto-fix attempts |
 | Appearance | Dark / light / system theme, language (Auto / English / Français) |
 
 Inline toggles in the chat bar:
@@ -237,6 +249,8 @@ No telemetry. No network calls except to your local Ollama instance and GitHub's
 | `Operator … context is incorrect` | Should be auto-handled by the VIEW_3D wrap. If it persists, check the Logs tab for details. |
 | `KeyError: 'Principled BSDF'` | Regenerate the turn (`↻`). The system prompt teaches the robust BSDF lookup pattern. |
 | `TypeError: brushes.new() tool=…` | Fixed automatically by the runtime AST sanitizer since v1.1.2. Update the app if you see this. |
+| `import_scene.obj` / `export_scene.obj` not found | Fixed automatically — the sanitizer rewrites to `wm.obj_import` / `wm.obj_export`. |
+| `mathutils.radians` / `mathutils.degrees` | Fixed automatically — rewritten to `math.radians` / `math.degrees`. |
 | Model hallucinates `bpy` calls | Use `qwen2.5-coder:7b` or `:14b`. Lower temperature to `0.1`. |
 | App won't start | Run `python main.py` in a terminal to see the traceback. Check `pip install -r requirements.txt`. |
 | Conversation too slow | Reduce **Max history tokens** in Settings or clear with `Ctrl+L`. |

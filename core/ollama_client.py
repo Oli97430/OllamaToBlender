@@ -96,6 +96,7 @@ class OllamaClient:
         *,
         temperature: float = 0.2,
         keep_alive: str = "5m",
+        num_ctx: int = 8192,
         stop_event: threading.Event | None = None,
         stats: StreamStats | None = None,
     ) -> Generator[str, None, None]:
@@ -112,7 +113,7 @@ class OllamaClient:
             "messages": list(messages),
             "stream": True,
             "keep_alive": keep_alive,
-            "options": {"temperature": temperature},
+            "options": {"temperature": temperature, "num_ctx": num_ctx},
         }
         with requests.post(
             f"{self.base_url}/api/chat",
@@ -247,12 +248,22 @@ def trim_history(
 def extract_python_code(text: str) -> str:
     """Pull the python block out of a model response.
 
-    Returns the first ```python ... ``` block, or an empty string if no
-    fence is found — prose without a code fence is NOT executable Python.
+    Returns the first ```python ... ``` block. If no fence is found, falls
+    back to checking whether the entire text is valid Python containing
+    `bpy` — small models frequently forget fences.
     """
+    import ast as _ast
     matches = CODE_FENCE_RE.findall(text)
     if matches:
         return matches[0].strip()
+    # Fallback: if the raw text parses as Python and references bpy, use it
+    stripped = text.strip()
+    if "bpy" in stripped:
+        try:
+            _ast.parse(stripped)
+            return stripped
+        except SyntaxError:
+            pass
     return ""
 
 
@@ -262,6 +273,8 @@ RECOMMENDED_MODELS: list[tuple[str, str]] = [
     ("qwen2.5-coder:7b", "Code, ~4.7 GB, Q4_K_M — best default"),
     ("qwen2.5-coder:14b", "Code, ~9 GB, Q4_K_M — better reasoning"),
     ("qwen2.5-coder:3b", "Code, ~1.9 GB, Q4_K_M — light VRAM"),
+    ("qwen2.5-vl:32b", "Vision+Code, ~20 GB, Q4_K_M — best for 24 GB GPUs"),
+    ("qwen2.5-vl:7b", "Vision+Code, ~5.5 GB, Q4_K_M — lightweight vision"),
     ("deepseek-coder-v2:16b", "Code, ~9 GB, Q4_0 — strong alternative"),
     ("codellama:13b", "Code, ~7.4 GB, Q4_0"),
     ("llama3.1:8b", "General, ~4.7 GB, Q4_K_M"),

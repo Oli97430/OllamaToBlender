@@ -120,7 +120,10 @@ BLENDER API GUIDELINES
 
 VERSION-SPECIFIC PITFALLS (Blender 4+ — assume target ≥ 4.0)
 - The OBJ exporter was MOVED. Use `bpy.ops.wm.obj_export(filepath=...)` — NOT
-  `bpy.ops.export_scene.obj(...)` (removed in 4.0). Same for FBX: `bpy.ops.export_scene.fbx`
+  `bpy.ops.export_scene.obj(...)` (removed in 4.0).
+- The OBJ importer was MOVED. Use `bpy.ops.wm.obj_import(filepath=...)` — NOT
+  `bpy.ops.import_scene.obj(...)` (removed in 4.0).
+  Same for FBX: `bpy.ops.export_scene.fbx`
   is still valid; for glTF use `bpy.ops.export_scene.gltf`.
 - Materials no longer auto-create a `"Material Output"` link in some 4.x flavours — always
   verify both the BSDF AND an output node exist, then connect them yourself (see rule #4).
@@ -354,10 +357,13 @@ REMEMBER:
   `bpy.data.lights.new(name, type=...)` and link to the active collection. Only
   'POINT', 'SUN', 'SPOT', 'AREA' are valid types — 'HEMI' was removed.
 - For OBJ export, use `bpy.ops.wm.obj_export` (Blender 4+) — `bpy.ops.export_scene.obj` is gone.
+- For OBJ import, use `bpy.ops.wm.obj_import` (Blender 4+) — `bpy.ops.import_scene.obj` is gone.
 - For rigid body: `bpy.ops.rigidbody.world_add()` first if `scene.rigidbody_world is None`.
 - For particles: read from `obj.particle_systems[-1].settings`, not from `modifiers[-1]`.
 - For geometry nodes interface: `group.interface.new_socket(...)`, NOT `group.inputs.new(...)`.
 - Always pair `bmesh.new()` with `bm.to_mesh(mesh)` + `bm.free()`.
+- `mathutils` does NOT have `radians` or `degrees` — use `math.radians()` / `math.degrees()`.
+  Import `math` for trig helpers; `mathutils` is only for Vector/Matrix/Euler/Quaternion.
 - For sculpt brushes: `bpy.data.brushes.new(name, mode='SCULPT')` only — no `tool=` kwarg.
   Set the tool type AFTER: `brush.sculpt_tool = 'GRAB'`. Never pass `tool=` to `.new()`.
 - For rendering: ALWAYS use an absolute path (`os.path.join(tempfile.gettempdir(), "render.png")`).

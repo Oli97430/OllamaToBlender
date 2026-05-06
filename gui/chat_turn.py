@@ -56,6 +56,8 @@ class ChatTurn(ctk.CTkFrame):
         self._dot_after_id: str | None = None
         self._stats: StreamStats | None = None
         self._created_at = time.time()
+        self._collapsed = False
+        self._on_edit_callback: Callable | None = None
 
         self._build_user_bubble(prompt)
         self._build_response_card()
@@ -79,14 +81,22 @@ class ChatTurn(ctk.CTkFrame):
                 )
             except Exception:
                 pass
-        ctk.CTkLabel(
+        self._bubble_label = ctk.CTkLabel(
             bubble,
             text=text,
             text_color=T.INK,
             font=(T.FONT_FAMILY, 15),
             justify="left",
-            wraplength=820,
-        ).pack(padx=14, pady=10, anchor="w")
+            wraplength=1400,
+        )
+        self._bubble_label.pack(padx=16, pady=12, anchor="w")
+        # Edit button on the bubble
+        edit_btn = ctk.CTkLabel(
+            bubble, text="✎", text_color=T.INK_DIM,
+            font=(T.FONT_FAMILY, 14), cursor="hand2",
+        )
+        edit_btn.pack(anchor="e", padx=(0, 10), pady=(0, 6))
+        edit_btn.bind("<Button-1>", lambda _e: self._on_edit_prompt())
 
     def _build_response_card(self) -> None:
         self.card = ctk.CTkFrame(
@@ -96,11 +106,13 @@ class ChatTurn(ctk.CTkFrame):
             border_width=1,
             border_color=T.EDGE,
         )
-        self.card.pack(fill="x", pady=(0, 18))
+        self.card.pack(fill="x", pady=(0, 12))
 
-        # Header strip
-        head = ctk.CTkFrame(self.card, fg_color="transparent")
-        head.pack(fill="x", padx=14, pady=(12, 6))
+        # Header strip (clickable to collapse/expand)
+        head = ctk.CTkFrame(self.card, fg_color="transparent", cursor="hand2")
+        head.pack(fill="x", padx=18, pady=(14, 8))
+        head.bind("<Button-1>", lambda _e: self.toggle_collapse())
+        self._head_frame = head
         self.spinner = ctk.CTkLabel(head, text="●", text_color=T.ACCENT, font=(T.FONT_FAMILY, 14))
         self.spinner.pack(side="left")
         ctk.CTkLabel(head, text=t("turn.assistant"), text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 13, "bold")).pack(side="left")
@@ -120,27 +132,34 @@ class ChatTurn(ctk.CTkFrame):
 
         self.status_label = ctk.CTkLabel(head, text=t("turn.thinking"), text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13))
         self.status_label.pack(side="right")
+        # Copy response button
+        self._copy_btn = ctk.CTkLabel(
+            head, text="📋", text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13), cursor="hand2",
+        )
+        self._copy_btn.pack(side="right", padx=(0, 8))
+        self._copy_btn.bind("<Button-1>", lambda _e: self._copy_response())
 
         # Streaming raw text (replaced by code view once we have a python block)
         self.stream_box = ctk.CTkTextbox(
             self.card,
-            height=84,
+            height=200,
             fg_color=T.BG_INPUT,
-            text_color=T.INK_MUTED,
+            text_color=T.INK,
             border_width=0,
-            font=(T.FONT_MONO, 13),
+            font=(T.FONT_FAMILY, 14),
             wrap="word",
+            corner_radius=T.R_SM,
         )
-        self.stream_box.pack(fill="x", padx=14, pady=(0, 8))
+        self.stream_box.pack(fill="x", padx=18, pady=(0, 8))
         self.stream_box.configure(state="disabled")
 
         # Code view (hidden until extraction, editable so the user can tweak before running)
-        self.code_view = CodeView(self.card, language="python (bpy)", height=240, editable=True)
+        self.code_view = CodeView(self.card, language="python (bpy)", height=360, editable=True)
         # not packed yet
 
         # Action bar
         self.actions = ctk.CTkFrame(self.card, fg_color="transparent")
-        self.actions.pack(fill="x", padx=14, pady=(0, 10))
+        self.actions.pack(fill="x", padx=18, pady=(0, 10))
 
         self.run_btn = ctk.CTkButton(
             self.actions,
@@ -198,18 +217,19 @@ class ChatTurn(ctk.CTkFrame):
         self.result_status = ctk.CTkLabel(
             self.result_frame, text="", text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 13)
         )
-        self.result_status.pack(anchor="w", padx=14, pady=(8, 0))
+        self.result_status.pack(anchor="w", padx=18, pady=(8, 0))
         self.result_box = ctk.CTkTextbox(
             self.result_frame,
-            height=140,
+            height=200,
             fg_color=T.BG_INPUT,
             text_color=T.INK,
             border_width=1,
             border_color=T.EDGE,
             font=(T.FONT_MONO, 13),
             wrap="word",
+            corner_radius=T.R_SM,
         )
-        self.result_box.pack(fill="x", padx=14, pady=(4, 12))
+        self.result_box.pack(fill="x", padx=18, pady=(4, 12))
         self.result_box.configure(state="disabled")
 
     # ------------------------------------------------------------------ stream
@@ -261,7 +281,7 @@ class ChatTurn(ctk.CTkFrame):
 
         if code and code.strip():
             self.stream_box.pack_forget()
-            self.code_view.pack(fill="x", padx=14, pady=(4, 8), before=self.actions)
+            self.code_view.pack(fill="x", padx=18, pady=(4, 8), before=self.actions)
             self.code_view.set_code(code)
             self.run_btn.configure(state="normal")
             self.save_btn.configure(state="normal")
@@ -302,6 +322,41 @@ class ChatTurn(ctk.CTkFrame):
     def _on_delete_clicked(self) -> None:
         if self.on_delete:
             self.on_delete(self)
+
+    def _on_edit_prompt(self) -> None:
+        """Let the user edit their prompt and re-submit (like ChatGPT)."""
+        if hasattr(self, "_on_edit_callback") and self._on_edit_callback:
+            self._on_edit_callback(self)
+
+    def _copy_response(self) -> None:
+        """Copy the full model response text to clipboard."""
+        text = self.full_response or ""
+        if text:
+            try:
+                self.clipboard_clear()
+                self.clipboard_append(text)
+            except Exception:
+                pass
+
+    def toggle_collapse(self) -> None:
+        """Toggle the response card between collapsed and expanded."""
+        if self._collapsed:
+            self.card.pack(fill="x", pady=(0, 12))
+            self._collapsed = False
+        else:
+            self.card.pack_forget()
+            self._collapsed = True
+
+    def set_prompt_mode(self, mode: str) -> None:
+        """Show a badge indicating which system prompt was used."""
+        if hasattr(self, "_mode_label"):
+            self._mode_label.configure(text=f"  ·  {mode}")
+        else:
+            self._mode_label = ctk.CTkLabel(
+                self._head_frame, text=f"  ·  {mode}",
+                text_color=T.INK_DIM, font=(T.FONT_MONO, 11),
+            )
+            self._mode_label.pack(side="left")
 
     def _save_code(self) -> None:
         code = self.code_view.get_code()
@@ -373,7 +428,7 @@ class ChatTurn(ctk.CTkFrame):
                     max_size=(720, 480),
                     caption=t("turn.preview.caption"),
                 )
-                self._render_preview.pack(fill="x", padx=14, pady=(0, 12))
+                self._render_preview.pack(fill="x", padx=18, pady=(0, 12))
             except Exception:
                 self._render_preview = None
         self.result_frame.pack(fill="x", before=self.actions)

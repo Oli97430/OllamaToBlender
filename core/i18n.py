@@ -250,6 +250,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "models.pull.cancelled": "Pull cancelled",
         "models.pull.cancel_tooltip": "Abort model download",
 
+        # --- token budget
+        "chat.token_budget.tooltip": "Tokens used / budget — older turns are trimmed automatically",
+
         # --- empty state suggestion chips (sculpting-focused)
         "suggest.sculpt_suzanne": "Add Suzanne, give it a Multires modifier (3 subdivisions), then switch to Sculpt mode ready for the Grab brush",
         "suggest.sculpt_dyntopo": "Spawn an icosphere, enable Dyntopo (detail 2.0) and enter Sculpt mode",
@@ -480,6 +483,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "models.btn.refresh": "Rafraîchir",
         "models.pull.cancelled": "Téléchargement annulé",
         "models.pull.cancel_tooltip": "Annuler le téléchargement",
+
+        # --- token budget
+        "chat.token_budget.tooltip": "Tokens utilisés / budget — les anciens turns sont coupés automatiquement",
 
         # --- empty state suggestion chips (sculpting-focused, in French)
         "suggest.sculpt_suzanne": "Ajoute Suzanne, applique un modificateur Multires (3 subdivisions), puis bascule en mode Sculpt prêt pour le brush Grab",
