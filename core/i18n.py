@@ -115,21 +115,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # --- setup view
         "setup.title": "Setup",
         "setup.intro": (
-            "UNIFICATION talks to creative apps through MCP addons "
-            "(tiny TCP servers on ports 9876-9880).  For Blender, install the addon once, "
-            "then enable it from Edit → Preferences → Add-ons."
+            "Install MCP addons into your creative apps.  "
+            "Each addon is a tiny TCP server that lets UNIFICATION send scripts remotely."
         ),
-        "setup.detected.title": "Detected Blender installs",
+        "setup.detected.title": "Detected installs",
         "setup.bundled_version": "Bundled addon: v{version}",
         "setup.btn.refresh": "Refresh",
         "setup.no_install": (
+            "No install detected automatically.\n"
+            "Add a path manually below."
+        ),
+        "setup.no_install.blender": (
             "No Blender install detected automatically.\n"
             "Add a path manually below — typically:\n"
             "   %APPDATA%\\Blender Foundation\\Blender\\<X.Y>\\scripts\\addons"
         ),
+        "setup.no_install.freecad": (
+            "No FreeCAD detected automatically.\n"
+            "Add a path manually — typically:\n"
+            "   %APPDATA%\\FreeCAD\\Macro\\"
+        ),
+        "setup.no_install.gimp": (
+            "No GIMP detected automatically.\n"
+            "Add a path manually — typically:\n"
+            "   %APPDATA%\\GIMP\\2.10\\plug-ins\\"
+        ),
         "setup.custom_path": "Custom path",
         "setup.btn.browse": "Browse",
-        "setup.btn.browse.tooltip": "Pick a Blender addons directory",
+        "setup.btn.browse.tooltip": "Pick an addon directory",
         "setup.btn.use": "Use",
         "setup.btn.use.tooltip": "Add this folder to the list",
         "setup.source.title": "Install source",
@@ -150,12 +163,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup.status.failed": "Install failed: {error}",
         "setup.installed.tag": "installed",
         "setup.not_installed.tag": "not installed",
+        # Blender next steps
         "setup.next_steps.title": "After installing",
-        "setup.next_steps.1": "1.  Open Blender",
-        "setup.next_steps.2": "2.  Edit → Preferences → Add-ons",
-        "setup.next_steps.3": "3.  Search “MCP Server”, tick the checkbox",
-        "setup.next_steps.4": "4.  3D Viewport → N-Panel → MCP",
-        "setup.next_steps.5": "5.  Come back to Chat — both pills should be green",
+        "setup.next_steps.blender.1": "1.  Open Blender",
+        "setup.next_steps.blender.2": "2.  Edit → Preferences → Add-ons",
+        "setup.next_steps.blender.3": '3.  Search "MCP Server", tick the checkbox',
+        "setup.next_steps.blender.4": "4.  3D Viewport → N-Panel → MCP → Start Server",
+        "setup.next_steps.blender.5": "5.  The Blender pill should turn green",
+        # FreeCAD next steps
+        "setup.next_steps.freecad.1": "1.  Open FreeCAD",
+        "setup.next_steps.freecad.2": "2.  Macro → Macros → select freecad_mcp_addon",
+        "setup.next_steps.freecad.3": "3.  Click Execute",
+        "setup.next_steps.freecad.4": "4.  The FreeCAD pill should turn green",
+        # GIMP next steps
+        "setup.next_steps.gimp.1": "1.  Restart GIMP",
+        "setup.next_steps.gimp.2": "2.  Filters → Python-Fu → MCP Server Start",
+        "setup.next_steps.gimp.3": "3.  (GIMP 3.0+: Filters → MCP Server Start)",
+        "setup.next_steps.gimp.4": "4.  The GIMP pill should turn green",
+        # Inkscape info
+        "setup.standalone.title": "Standalone servers",
+        "setup.standalone.inkscape": (
+            "Inkscape  (port 9879)\n"
+            "Inkscape doesn't support persistent plugins.  Run the server alongside:\n"
+            "   python assets/inkscape_mcp_server.py\n"
+            "Requires: pip install lxml"
+        ),
+        "setup.standalone.photoshop": (
+            "Photoshop  (port 9880)\n"
+            "Run the server alongside Photoshop:\n"
+            "   python assets/photoshop_mcp_server.py\n"
+            "Windows: pip install pywin32  |  macOS: no extra deps"
+        ),
 
         # --- models view
         "models.title": "Models",
@@ -363,21 +401,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # --- setup view
         "setup.title": "Installation",
         "setup.intro": (
-            "UNIFICATION communique avec les applis créatives via des addons MCP "
-            "(petits serveurs TCP sur les ports 9876-9880).  Pour Blender, installe l'addon une fois, "
-            "puis active-le depuis Édition → Préférences → Add-ons."
+            "Installe les addons MCP dans tes applis créatives.  "
+            "Chaque addon est un petit serveur TCP qui permet à UNIFICATION d'envoyer des scripts."
         ),
-        "setup.detected.title": "Installations Blender détectées",
+        "setup.detected.title": "Installations détectées",
         "setup.bundled_version": "Addon embarqué : v{version}",
         "setup.btn.refresh": "Rafraîchir",
         "setup.no_install": (
-            "Aucune installation Blender détectée automatiquement.\n"
-            "Ajoute un chemin manuellement ci-dessous — typiquement :\n"
+            "Aucune installation détectée automatiquement.\n"
+            "Ajoute un chemin manuellement ci-dessous."
+        ),
+        "setup.no_install.blender": (
+            "Aucune installation Blender détectée.\n"
+            "Ajoute un chemin manuellement — typiquement :\n"
             "   %APPDATA%\\Blender Foundation\\Blender\\<X.Y>\\scripts\\addons"
+        ),
+        "setup.no_install.freecad": (
+            "Aucune installation FreeCAD détectée.\n"
+            "Ajoute un chemin manuellement — typiquement :\n"
+            "   %APPDATA%\\FreeCAD\\Macro\\"
+        ),
+        "setup.no_install.gimp": (
+            "Aucune installation GIMP détectée.\n"
+            "Ajoute un chemin manuellement — typiquement :\n"
+            "   %APPDATA%\\GIMP\\2.10\\plug-ins\\"
         ),
         "setup.custom_path": "Chemin personnalisé",
         "setup.btn.browse": "Parcourir",
-        "setup.btn.browse.tooltip": "Choisir un dossier d'addons Blender",
+        "setup.btn.browse.tooltip": "Choisir un dossier d'addons",
         "setup.btn.use": "Ajouter",
         "setup.btn.use.tooltip": "Ajouter ce dossier à la liste",
         "setup.source.title": "Source d'installation",
@@ -398,12 +449,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup.status.failed": "Échec de l'installation : {error}",
         "setup.installed.tag": "installé",
         "setup.not_installed.tag": "non installé",
+        # Blender
         "setup.next_steps.title": "Après l'installation",
-        "setup.next_steps.1": "1.  Ouvre Blender",
-        "setup.next_steps.2": "2.  Édition → Préférences → Add-ons",
-        "setup.next_steps.3": "3.  Cherche « MCP Server », coche la case",
-        "setup.next_steps.4": "4.  Viewport 3D → N-Panel → MCP",
-        "setup.next_steps.5": "5.  Reviens dans Discussion — les deux pastilles doivent passer au vert",
+        "setup.next_steps.blender.1": "1.  Ouvre Blender",
+        "setup.next_steps.blender.2": "2.  Édition → Préférences → Add-ons",
+        "setup.next_steps.blender.3": "3.  Cherche « MCP Server », coche la case",
+        "setup.next_steps.blender.4": "4.  Viewport 3D → N-Panel → MCP → Start Server",
+        "setup.next_steps.blender.5": "5.  La pastille Blender doit passer au vert",
+        # FreeCAD
+        "setup.next_steps.freecad.1": "1.  Ouvre FreeCAD",
+        "setup.next_steps.freecad.2": "2.  Macro → Macros → sélectionne freecad_mcp_addon",
+        "setup.next_steps.freecad.3": "3.  Clique Exécuter",
+        "setup.next_steps.freecad.4": "4.  La pastille FreeCAD doit passer au vert",
+        # GIMP
+        "setup.next_steps.gimp.1": "1.  Redémarre GIMP",
+        "setup.next_steps.gimp.2": "2.  Filtres → Python-Fu → MCP Server Start",
+        "setup.next_steps.gimp.3": "3.  (GIMP 3.0+ : Filtres → MCP Server Start)",
+        "setup.next_steps.gimp.4": "4.  La pastille GIMP doit passer au vert",
+        # Standalone
+        "setup.standalone.title": "Serveurs standalone",
+        "setup.standalone.inkscape": (
+            "Inkscape  (port 9879)\n"
+            "Inkscape ne supporte pas les plugins persistants.  Lance le serveur à côté :\n"
+            "   python assets/inkscape_mcp_server.py\n"
+            "Requis : pip install lxml"
+        ),
+        "setup.standalone.photoshop": (
+            "Photoshop  (port 9880)\n"
+            "Lance le serveur à côté de Photoshop :\n"
+            "   python assets/photoshop_mcp_server.py\n"
+            "Windows : pip install pywin32  |  macOS : aucune dépendance"
+        ),
 
         # --- models view
         "models.title": "Modèles",

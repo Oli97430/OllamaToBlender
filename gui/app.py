@@ -18,6 +18,7 @@ from PIL import Image
 
 from core import (
     ADDON_REMOTE_URL,
+    AppAddonDir,
     BlenderAddonDir,
     BlenderClient,
     CREATIVE_APPS,
@@ -31,11 +32,15 @@ from core import (
     check_for_update,
     estimate_history_tokens,
     find_blender_addon_dirs,
+    find_freecad_addon_dirs,
+    find_gimp_addon_dirs,
     install_addon,
+    install_app_addon,
     lint_python,
     load_history,
     model_supports_vision,
     open_addon_dir,
+    open_app_addon_dir,
     pick_system_prompt,
     ping_tcp_addon,
     read_bundled_version,
@@ -44,6 +49,7 @@ from core import (
     t,
     trim_history,
     uninstall_addon,
+    uninstall_app_addon,
 )
 from core.ollama_client import RECOMMENDED_MODELS, extract_python_code
 from core.settings import LOG_PATH
@@ -794,10 +800,12 @@ class UnificationApp(ctk.CTk):
 
     # =========================================================== setup view
 
+    _SETUP_APPS = ["Blender", "FreeCAD", "GIMP", "Inkscape", "Photoshop"]
+
     def _build_setup_view(self) -> None:
         view = ctk.CTkFrame(self.content, fg_color=T.BG_BASE)
         view.grid_columnconfigure(0, weight=1)
-        view.grid_rowconfigure(2, weight=1)
+        view.grid_rowconfigure(3, weight=1)
         self._views["setup"] = view
 
         # ----- header
@@ -811,18 +819,70 @@ class UnificationApp(ctk.CTk):
             font=(T.FONT_FAMILY, 13),
             justify="left",
             wraplength=1020,
-        ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 12))
+        ).grid(row=1, column=0, sticky="w", padx=4, pady=(0, 8))
 
-        # ----- body grid: detected dirs (left) + actions (right)
-        body = ctk.CTkFrame(view, fg_color="transparent")
-        body.grid(row=2, column=0, sticky="nsew")
-        body.grid_columnconfigure(0, weight=3)
-        body.grid_columnconfigure(1, weight=2)
-        body.grid_rowconfigure(0, weight=1)
+        # ----- app selector (segmented button)
+        self._setup_app_var = ctk.StringVar(value="Blender")
+        seg = ctk.CTkSegmentedButton(
+            view,
+            values=self._SETUP_APPS,
+            variable=self._setup_app_var,
+            command=self._on_setup_app_changed,
+            font=(T.FONT_FAMILY, 13, "bold"),
+            selected_color=T.ACCENT,
+            selected_hover_color=T.ACCENT_HOVER,
+            unselected_color=T.BG_PANEL,
+            unselected_hover_color=T.BG_RAISED,
+            text_color="#1a1a1a",
+            text_color_disabled=T.INK_DIM,
+        )
+        seg.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 10))
+
+        # ----- body container — rebuilt when the app segment changes
+        self._setup_body = ctk.CTkFrame(view, fg_color="transparent")
+        self._setup_body.grid(row=3, column=0, sticky="nsew")
+
+        # Shared state
+        self._addon_selected = ctk.StringVar(value="")
+        self._addon_dirs: list[BlenderAddonDir] = []
+        self._app_addon_dirs: list[AppAddonDir] = []
+        self._addon_source = ctk.StringVar(value="remote")
+
+        # Placeholder refs (assigned when body is built)
+        self.addon_dirs_frame: ctk.CTkScrollableFrame | None = None
+        self.btn_install: ctk.CTkButton | None = None
+        self.btn_open_dir: IconButton | None = None
+        self.btn_uninstall: IconButton | None = None
+        self.addon_status_label: ctk.CTkLabel | None = None
+        self.addon_manual_entry: ctk.CTkEntry | None = None
+
+        # Build initial view
+        self._build_setup_body()
+
+    def _on_setup_app_changed(self, _value: str = "") -> None:
+        self._build_setup_body()
+
+    def _build_setup_body(self) -> None:
+        """Rebuild the setup body for the currently selected app."""
+        # Clear
+        for child in self._setup_body.winfo_children():
+            child.destroy()
+
+        app = self._setup_app_var.get()
+
+        if app in ("Inkscape", "Photoshop"):
+            self._build_standalone_info(app)
+            return
+
+        # ----- installable app (Blender / FreeCAD / GIMP)
+        self._setup_body.grid_columnconfigure(0, weight=3)
+        self._setup_body.grid_columnconfigure(1, weight=2)
+        self._setup_body.grid_rowconfigure(0, weight=1)
 
         # Left: detected installs
         left = ctk.CTkFrame(
-            body, fg_color=T.BG_PANEL, corner_radius=T.R_LG, border_width=1, border_color=T.EDGE,
+            self._setup_body, fg_color=T.BG_PANEL, corner_radius=T.R_LG,
+            border_width=1, border_color=T.EDGE,
         )
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
@@ -832,18 +892,17 @@ class UnificationApp(ctk.CTk):
                      font=(T.FONT_FAMILY, 15, "bold")).pack(side="left")
         IconButton(head, text=t("setup.btn.refresh"), command=self._refresh_addon_dirs, width=84).pack(side="right")
 
-        ctk.CTkLabel(
-            left,
-            text=t("setup.bundled_version", version=read_bundled_version() or "?"),
-            text_color=T.INK_DIM,
-            font=(T.FONT_MONO, 12),
-        ).pack(anchor="w", padx=14)
+        if app == "Blender":
+            ctk.CTkLabel(
+                left,
+                text=t("setup.bundled_version", version=read_bundled_version() or "?"),
+                text_color=T.INK_DIM, font=(T.FONT_MONO, 12),
+            ).pack(anchor="w", padx=14)
 
         self.addon_dirs_frame = ctk.CTkScrollableFrame(left, fg_color="transparent")
         self.addon_dirs_frame.pack(fill="both", expand=True, padx=8, pady=(8, 12))
 
-        self._addon_selected = ctk.StringVar(value="")
-        self._addon_dirs: list[BlenderAddonDir] = []
+        self._addon_selected.set("")
 
         # Manual path
         manual = ctk.CTkFrame(left, fg_color="transparent")
@@ -854,41 +913,43 @@ class UnificationApp(ctk.CTk):
         manual_row.pack(fill="x", pady=(2, 0))
         self.addon_manual_entry = ctk.CTkEntry(
             manual_row,
-            placeholder_text=r"e.g. C:\Users\<you>\AppData\Roaming\Blender Foundation\Blender\4.5\scripts\addons",
+            placeholder_text=t("setup.btn.browse.tooltip"),
             fg_color=T.BG_INPUT, border_color=T.EDGE, text_color=T.INK,
             font=(T.FONT_MONO, 12),
         )
         self.addon_manual_entry.pack(side="left", fill="x", expand=True)
-        IconButton(manual_row, text="Browse", command=self._pick_addon_dir,
-                   tooltip="Pick a Blender addons directory", width=82
+        IconButton(manual_row, text=t("setup.btn.browse"), command=self._pick_addon_dir, width=82
                    ).pack(side="left", padx=(6, 0))
-        IconButton(manual_row, text="Use", command=self._add_manual_addon_dir,
-                   tooltip="Add this folder to the list", width=72
+        IconButton(manual_row, text=t("setup.btn.use"), command=self._add_manual_addon_dir, width=72
                    ).pack(side="left", padx=(6, 0))
 
         # Right: source + actions
         right = ctk.CTkFrame(
-            body, fg_color=T.BG_PANEL, corner_radius=T.R_LG, border_width=1, border_color=T.EDGE,
+            self._setup_body, fg_color=T.BG_PANEL, corner_radius=T.R_LG,
+            border_width=1, border_color=T.EDGE,
         )
         right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
-        ctk.CTkLabel(right, text=t("setup.source.title"), text_color=T.INK,
-                     font=(T.FONT_FAMILY, 15, "bold")).pack(anchor="w", padx=14, pady=(12, 4))
-
-        self._addon_source = ctk.StringVar(value="remote")
-        for val, label, tip in [
-            ("remote", t("setup.source.remote"), f"GET {ADDON_REMOTE_URL}"),
-            ("bundled", t("setup.source.bundled"), t("setup.source.bundled.tooltip")),
-        ]:
-            rb = ctk.CTkRadioButton(
-                right, text=label, value=val, variable=self._addon_source,
-                fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, border_color=T.EDGE,
-                text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 13),
-            )
-            rb.pack(anchor="w", padx=14, pady=2)
-            attach_tooltip(rb, tip)
-
-        ctk.CTkLabel(right, text="", height=4).pack()  # spacer
+        # Source selector (only Blender has a remote option)
+        if app == "Blender":
+            ctk.CTkLabel(right, text=t("setup.source.title"), text_color=T.INK,
+                         font=(T.FONT_FAMILY, 15, "bold")).pack(anchor="w", padx=14, pady=(12, 4))
+            self._addon_source.set("remote")
+            for val, label, tip in [
+                ("remote", t("setup.source.remote"), f"GET {ADDON_REMOTE_URL}"),
+                ("bundled", t("setup.source.bundled"), t("setup.source.bundled.tooltip")),
+            ]:
+                rb = ctk.CTkRadioButton(
+                    right, text=label, value=val, variable=self._addon_source,
+                    fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, border_color=T.EDGE,
+                    text_color=T.INK_MUTED, font=(T.FONT_FAMILY, 13),
+                )
+                rb.pack(anchor="w", padx=14, pady=2)
+                attach_tooltip(rb, tip)
+            ctk.CTkLabel(right, text="", height=4).pack()
+        else:
+            self._addon_source.set("bundled")
+            ctk.CTkLabel(right, text="", height=8).pack()
 
         self.btn_install = ctk.CTkButton(
             right,
@@ -901,16 +962,14 @@ class UnificationApp(ctk.CTk):
 
         self.btn_open_dir = IconButton(
             right, text=t("setup.btn.open_folder"), command=self._on_open_addon_dir,
-            tooltip=t("setup.btn.open_folder.tooltip"),
-            width=210, height=38,
+            tooltip=t("setup.btn.open_folder.tooltip"), width=210, height=38,
         )
         self.btn_open_dir.configure(state="disabled")
         self.btn_open_dir.pack(fill="x", padx=14, pady=(0, 4))
 
         self.btn_uninstall = IconButton(
             right, text=t("setup.btn.uninstall"), command=self._on_uninstall_addon,
-            tooltip=t("setup.btn.uninstall.tooltip"),
-            width=210, height=38,
+            tooltip=t("setup.btn.uninstall.tooltip"), width=210, height=38,
         )
         self.btn_uninstall.configure(state="disabled")
         self.btn_uninstall.pack(fill="x", padx=14, pady=(0, 12))
@@ -922,60 +981,105 @@ class UnificationApp(ctk.CTk):
         self.addon_status_label.pack(anchor="w", padx=14, pady=(0, 12))
 
         # Next steps
+        app_key = app.lower()
+        steps_key = f"setup.next_steps.{app_key}"
         ctk.CTkLabel(right, text=t("setup.next_steps.title"), text_color=T.INK,
                      font=(T.FONT_FAMILY, 15, "bold")).pack(anchor="w", padx=14, pady=(2, 4))
-        for step in (
-            t("setup.next_steps.1"),
-            t("setup.next_steps.2"),
-            t("setup.next_steps.3"),
-            t("setup.next_steps.4"),
-            t("setup.next_steps.5"),
-        ):
-            ctk.CTkLabel(right, text=step, text_color=T.INK_MUTED,
+        for i in range(1, 6):
+            step_text = t(f"{steps_key}.{i}")
+            if step_text == f"{steps_key}.{i}":
+                break  # key doesn't exist, stop
+            ctk.CTkLabel(right, text=step_text, text_color=T.INK_MUTED,
                          font=(T.FONT_FAMILY, 13), justify="left",
                          ).pack(anchor="w", padx=18, pady=1)
         ctk.CTkLabel(right, text="").pack(pady=(0, 12))
 
+        # Populate left panel
+        self._refresh_addon_dirs()
+
+    def _build_standalone_info(self, app: str) -> None:
+        """Build info panel for Inkscape / Photoshop (standalone servers)."""
+        frame = ctk.CTkFrame(
+            self._setup_body, fg_color=T.BG_PANEL, corner_radius=T.R_LG,
+            border_width=1, border_color=T.EDGE,
+        )
+        frame.pack(fill="both", expand=True, padx=0, pady=0)
+
+        ctk.CTkLabel(frame, text=t("setup.standalone.title"), text_color=T.INK,
+                     font=(T.FONT_FAMILY, 18, "bold")).pack(anchor="w", padx=20, pady=(20, 12))
+
+        key = "setup.standalone." + app.lower()
+        info_text = t(key)
+        ctk.CTkLabel(
+            frame, text=info_text, text_color=T.INK_MUTED,
+            font=(T.FONT_MONO, 13), justify="left", wraplength=900,
+        ).pack(anchor="w", padx=20, pady=(0, 20))
+
     # ---- setup view actions
 
     def _refresh_addon_dirs(self) -> None:
+        if self.addon_dirs_frame is None:
+            return
         for child in self.addon_dirs_frame.winfo_children():
             child.destroy()
-        dirs = find_blender_addon_dirs()
-        # Preserve any manually-added paths
-        existing_manual = [d for d in self._addon_dirs if d.path not in {x.path for x in dirs}]
-        self._addon_dirs = dirs + existing_manual
 
-        if not self._addon_dirs:
-            ctk.CTkLabel(
-                self.addon_dirs_frame,
-                t("setup.no_install"),
-                text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13), justify="left",
-            ).pack(pady=20, padx=8, anchor="w")
-            self._update_addon_actions()
-            return
+        app = self._setup_app_var.get()
+        app_key = app.lower()
 
-        # auto-pick the latest version if nothing selected
-        current = self._addon_selected.get()
-        if not current or current not in {str(d.path) for d in self._addon_dirs}:
-            self._addon_selected.set(str(self._addon_dirs[0].path))
+        if app == "Blender":
+            dirs = find_blender_addon_dirs()
+            existing_manual = [d for d in self._addon_dirs if d.path not in {x.path for x in dirs}]
+            self._addon_dirs = dirs + existing_manual
+            self._app_addon_dirs = []
 
-        for d in self._addon_dirs:
-            self._render_addon_row(d)
+            if not self._addon_dirs:
+                no_install_key = f"setup.no_install.{app_key}"
+                ctk.CTkLabel(
+                    self.addon_dirs_frame, text=t(no_install_key),
+                    text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13), justify="left",
+                ).pack(pady=20, padx=8, anchor="w")
+                self._update_addon_actions()
+                return
+
+            current = self._addon_selected.get()
+            if not current or current not in {str(d.path) for d in self._addon_dirs}:
+                self._addon_selected.set(str(self._addon_dirs[0].path))
+            for d in self._addon_dirs:
+                self._render_blender_addon_row(d)
+        else:
+            # FreeCAD or GIMP
+            if app == "FreeCAD":
+                dirs_app = find_freecad_addon_dirs()
+            else:
+                dirs_app = find_gimp_addon_dirs()
+            self._app_addon_dirs = dirs_app
+            self._addon_dirs = []
+
+            if not self._app_addon_dirs:
+                no_install_key = f"setup.no_install.{app_key}"
+                ctk.CTkLabel(
+                    self.addon_dirs_frame, text=t(no_install_key),
+                    text_color=T.INK_DIM, font=(T.FONT_FAMILY, 13), justify="left",
+                ).pack(pady=20, padx=8, anchor="w")
+                self._update_addon_actions()
+                return
+
+            current = self._addon_selected.get()
+            if not current or current not in {str(d.path) for d in self._app_addon_dirs}:
+                self._addon_selected.set(str(self._app_addon_dirs[0].path))
+            for d in self._app_addon_dirs:
+                self._render_app_addon_row(d)
+
         self._update_addon_actions()
 
-    def _render_addon_row(self, d: BlenderAddonDir) -> None:
+    def _render_blender_addon_row(self, d: BlenderAddonDir) -> None:
         row = ctk.CTkFrame(self.addon_dirs_frame, fg_color=T.BG_RAISED, corner_radius=T.R_MD)
         row.pack(fill="x", pady=4, padx=4)
 
         rb = ctk.CTkRadioButton(
-            row,
-            text="",
-            value=str(d.path),
-            variable=self._addon_selected,
+            row, text="", value=str(d.path), variable=self._addon_selected,
             fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, border_color=T.EDGE,
-            command=self._update_addon_actions,
-            width=24,
+            command=self._update_addon_actions, width=24,
         )
         rb.pack(side="left", padx=(12, 4), pady=10)
 
@@ -988,15 +1092,40 @@ class UnificationApp(ctk.CTk):
         ctk.CTkLabel(info, text=str(d.path), text_color=T.INK_DIM,
                      font=(T.FONT_MONO, 12)).pack(anchor="w")
 
+        tag_text = t("setup.installed.tag") if d.is_installed else t("setup.not_installed.tag")
+        tag_color = T.OK if d.is_installed else T.INK_DIM
+        ctk.CTkLabel(row, text=tag_text, text_color=tag_color,
+                     font=(T.FONT_FAMILY, 12, "bold" if d.is_installed else "normal")
+                     ).pack(side="right", padx=12)
+
+    def _render_app_addon_row(self, d: AppAddonDir) -> None:
+        row = ctk.CTkFrame(self.addon_dirs_frame, fg_color=T.BG_RAISED, corner_radius=T.R_MD)
+        row.pack(fill="x", pady=4, padx=4)
+
+        rb = ctk.CTkRadioButton(
+            row, text="", value=str(d.path), variable=self._addon_selected,
+            fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, border_color=T.EDGE,
+            command=self._update_addon_actions, width=24,
+        )
+        rb.pack(side="left", padx=(12, 4), pady=10)
+
+        info = ctk.CTkFrame(row, fg_color="transparent")
+        info.pack(side="left", fill="x", expand=True, pady=8)
+        title = d.label
         if d.is_installed:
-            tag = ctk.CTkLabel(row, text=t("setup.installed.tag"), text_color=T.OK,
-                               font=(T.FONT_FAMILY, 12, "bold"))
-        else:
-            tag = ctk.CTkLabel(row, text=t("setup.not_installed.tag"), text_color=T.INK_DIM,
-                               font=(T.FONT_FAMILY, 12))
-        tag.pack(side="right", padx=12)
+            title += "   ·   ✓ " + t("setup.installed.tag") + " v" + d.installed_version
+        ctk.CTkLabel(info, text=title, text_color=T.INK, font=(T.FONT_FAMILY, 14, "bold")).pack(anchor="w")
+        ctk.CTkLabel(info, text=str(d.path), text_color=T.INK_DIM,
+                     font=(T.FONT_MONO, 12)).pack(anchor="w")
+
+        tag_text = t("setup.installed.tag") if d.is_installed else t("setup.not_installed.tag")
+        tag_color = T.OK if d.is_installed else T.INK_DIM
+        ctk.CTkLabel(row, text=tag_text, text_color=tag_color,
+                     font=(T.FONT_FAMILY, 12, "bold" if d.is_installed else "normal")
+                     ).pack(side="right", padx=12)
 
     def _selected_addon_dir(self) -> BlenderAddonDir | None:
+        """Return selected Blender addon dir (Blender tab only)."""
         sel = self._addon_selected.get()
         if not sel:
             return None
@@ -1005,70 +1134,126 @@ class UnificationApp(ctk.CTk):
                 return d
         return None
 
+    def _selected_app_addon_dir(self) -> AppAddonDir | None:
+        """Return selected app addon dir (FreeCAD / GIMP tabs)."""
+        sel = self._addon_selected.get()
+        if not sel:
+            return None
+        for d in self._app_addon_dirs:
+            if str(d.path) == sel:
+                return d
+        return None
+
     def _update_addon_actions(self) -> None:
-        d = self._selected_addon_dir()
+        if self.btn_install is None:
+            return
+        app = self._setup_app_var.get()
+        if app == "Blender":
+            d = self._selected_addon_dir()
+            is_installed = d.is_installed if d else False
+            path_str = str(d.path) if d else ""
+            version = d.installed_version if d else ""
+        else:
+            da = self._selected_app_addon_dir()
+            is_installed = da.is_installed if da else False
+            path_str = str(da.path) if da else ""
+            version = da.installed_version if da else ""
+            d = da  # type: ignore[assignment]
+
         if d is None:
             self.btn_install.configure(state="disabled")
             self.btn_open_dir.configure(state="disabled")
             self.btn_uninstall.configure(state="disabled")
             self.addon_status_label.configure(text=t("setup.status.select"), text_color=T.INK_DIM)
             return
-        self.btn_install.configure(state="normal", text=t("setup.btn.reinstall") if d.is_installed else t("setup.btn.install_only"))
+        self.btn_install.configure(
+            state="normal",
+            text=t("setup.btn.reinstall") if is_installed else t("setup.btn.install_only"),
+        )
         self.btn_open_dir.configure(state="normal")
-        self.btn_uninstall.configure(state="normal" if d.is_installed else "disabled")
-        if d.is_installed:
+        self.btn_uninstall.configure(state="normal" if is_installed else "disabled")
+        if is_installed:
             self.addon_status_label.configure(
-                t("setup.status.installed", version=d.installed_version, path=str(d.path)),
+                text=t("setup.status.installed", version=version, path=path_str),
                 text_color=T.OK,
             )
         else:
             self.addon_status_label.configure(
-                t("setup.status.will_install", path=str(d.path)), text_color=T.INK_MUTED,
+                text=t("setup.status.will_install", path=path_str),
+                text_color=T.INK_MUTED,
             )
 
     def _pick_addon_dir(self) -> None:
-        path = filedialog.askdirectory(title="Pick a Blender addons directory")
-        if path:
+        path = filedialog.askdirectory(title=t("setup.btn.browse.tooltip"))
+        if path and self.addon_manual_entry:
             self.addon_manual_entry.delete(0, "end")
             self.addon_manual_entry.insert(0, path)
 
     def _add_manual_addon_dir(self) -> None:
+        if not self.addon_manual_entry:
+            return
         raw = self.addon_manual_entry.get().strip()
         if not raw:
             Toast(self, t("toast.attach_pick_first"), kind="warn")
             return
         path = Path(raw).expanduser()
-        # Try to infer version from path (X.Y component)
-        version = "?"
-        for part in path.parts:
-            if re.match(r"^\d+\.\d+$", part):
-                version = part
-                break
-        from core.addon_installer import read_installed_version, ADDON_FILE_NAME
-        installed = read_installed_version(path / ADDON_FILE_NAME)
-        existing = next((d for d in self._addon_dirs if d.path == path), None)
-        if existing:
-            existing.installed_version = installed
+        app = self._setup_app_var.get()
+
+        if app == "Blender":
+            from core.addon_installer import read_installed_version, ADDON_FILE_NAME
+            version = "?"
+            for part in path.parts:
+                if re.match(r"^\d+\.\d+$", part):
+                    version = part
+                    break
+            installed = read_installed_version(path / ADDON_FILE_NAME)
+            existing = next((d for d in self._addon_dirs if d.path == path), None)
+            if existing:
+                existing.installed_version = installed
+            else:
+                self._addon_dirs.append(BlenderAddonDir(version=version, path=path, installed_version=installed))
         else:
-            self._addon_dirs.append(BlenderAddonDir(version=version, path=path, installed_version=installed))
+            from core.addon_installer import (
+                read_installed_version, FREECAD_ADDON_FILE, GIMP_ADDON_FILE,
+                BUNDLED_FREECAD_PATH, BUNDLED_GIMP_PATH,
+            )
+            if app == "FreeCAD":
+                fname, bundled = FREECAD_ADDON_FILE, BUNDLED_FREECAD_PATH
+            else:
+                fname, bundled = GIMP_ADDON_FILE, BUNDLED_GIMP_PATH
+            installed = read_installed_version(path / fname)
+            existing_a = next((d for d in self._app_addon_dirs if d.path == path), None)
+            if existing_a:
+                existing_a.installed_version = installed
+            else:
+                self._app_addon_dirs.append(AppAddonDir(
+                    app=app.lower(), label=f"{app}  —  {path}",
+                    path=path, addon_filename=fname, bundled_path=bundled,
+                    installed_version=installed,
+                ))
+
         self._addon_selected.set(str(path))
-        # Re-render
-        for child in self.addon_dirs_frame.winfo_children():
-            child.destroy()
-        for d in self._addon_dirs:
-            self._render_addon_row(d)
-        self._update_addon_actions()
+        self._refresh_addon_dirs()
 
     def _on_install_addon(self) -> None:
-        d = self._selected_addon_dir()
-        if d is None:
-            return
-        self.btn_install.configure(state="disabled", text="working…")
-        self.addon_status_label.configure(text=t("setup.status.installing"), text_color=T.WARN)
-        source = self._addon_source.get()
-        threading.Thread(target=self._install_addon_worker, args=(d, source), daemon=True).start()
+        app = self._setup_app_var.get()
+        if app == "Blender":
+            d = self._selected_addon_dir()
+            if d is None:
+                return
+            self.btn_install.configure(state="disabled", text="working…")
+            self.addon_status_label.configure(text=t("setup.status.installing"), text_color=T.WARN)
+            source = self._addon_source.get()
+            threading.Thread(target=self._install_blender_worker, args=(d, source), daemon=True).start()
+        else:
+            da = self._selected_app_addon_dir()
+            if da is None:
+                return
+            self.btn_install.configure(state="disabled", text="working…")
+            self.addon_status_label.configure(text=t("setup.status.installing"), text_color=T.WARN)
+            threading.Thread(target=self._install_app_worker, args=(da,), daemon=True).start()
 
-    def _install_addon_worker(self, d: BlenderAddonDir, source: str) -> None:
+    def _install_blender_worker(self, d: BlenderAddonDir, source: str) -> None:
         try:
             dest = install_addon(d, source=source)
         except Exception as exc:
@@ -1077,29 +1262,64 @@ class UnificationApp(ctk.CTk):
                 text=t("setup.status.failed", error=str(exc)), text_color=T.ERR
             ))
             self.after(0, self._update_addon_actions)
-            self.after(0, lambda: self._log(f"addon install failed: {exc}"))
+            self.after(0, lambda: self._log(f"Blender addon install failed: {exc}"))
             return
         self.after(0, lambda: Toast(self, t("toast.addon_installed", version=d.installed_version), kind="ok"))
-        self.after(0, lambda: self._log(f"addon installed v{d.installed_version} → {dest}"))
+        self.after(0, lambda: self._log(f"Blender addon installed v{d.installed_version} → {dest}"))
+        self.after(0, self._refresh_addon_dirs)
+
+    def _install_app_worker(self, d: AppAddonDir) -> None:
+        try:
+            dest = install_app_addon(d)
+        except Exception as exc:
+            self.after(0, lambda: Toast(self, t("toast.addon_install_failed", error=str(exc)), kind="err"))
+            self.after(0, lambda: self.addon_status_label.configure(
+                text=t("setup.status.failed", error=str(exc)), text_color=T.ERR
+            ))
+            self.after(0, self._update_addon_actions)
+            self.after(0, lambda: self._log(f"{d.app} addon install failed: {exc}"))
+            return
+        self.after(0, lambda: Toast(self, t("toast.addon_installed", version=d.installed_version), kind="ok"))
+        self.after(0, lambda: self._log(f"{d.app} addon installed v{d.installed_version} → {dest}"))
         self.after(0, self._refresh_addon_dirs)
 
     def _on_open_addon_dir(self) -> None:
-        d = self._selected_addon_dir()
-        if d is None:
-            return
-        if not open_addon_dir(d):
-            Toast(self, t("toast.cant_open_explorer"), kind="err")
+        app = self._setup_app_var.get()
+        if app == "Blender":
+            d = self._selected_addon_dir()
+            if d is None:
+                return
+            if not open_addon_dir(d):
+                Toast(self, t("toast.cant_open_explorer"), kind="err")
+        else:
+            da = self._selected_app_addon_dir()
+            if da is None:
+                return
+            if not open_app_addon_dir(da):
+                Toast(self, t("toast.cant_open_explorer"), kind="err")
 
     def _on_uninstall_addon(self) -> None:
-        d = self._selected_addon_dir()
-        if d is None or not d.is_installed:
-            return
-        if uninstall_addon(d):
-            Toast(self, t("toast.addon_removed"), kind="ok")
-            self._log(f"addon uninstalled from {d.path}")
-            self._refresh_addon_dirs()
+        app = self._setup_app_var.get()
+        if app == "Blender":
+            d = self._selected_addon_dir()
+            if d is None or not d.is_installed:
+                return
+            if uninstall_addon(d):
+                Toast(self, t("toast.addon_removed"), kind="ok")
+                self._log(f"Blender addon uninstalled from {d.path}")
+                self._refresh_addon_dirs()
+            else:
+                Toast(self, t("toast.addon_remove_failed"), kind="err")
         else:
-            Toast(self, t("toast.addon_remove_failed"), kind="err")
+            da = self._selected_app_addon_dir()
+            if da is None or not da.is_installed:
+                return
+            if uninstall_app_addon(da):
+                Toast(self, t("toast.addon_removed"), kind="ok")
+                self._log(f"{da.app} addon uninstalled from {da.path}")
+                self._refresh_addon_dirs()
+            else:
+                Toast(self, t("toast.addon_remove_failed"), kind="err")
 
     # =========================================================== models view
 

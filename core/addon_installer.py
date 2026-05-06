@@ -1,21 +1,36 @@
-"""Detect Blender install dirs and install / update the blender-mcp-addon."""
+"""Detect creative-app install dirs and install / update MCP addons.
+
+Supports: Blender, FreeCAD, GIMP.
+Inkscape and Photoshop use standalone servers — no in-app installation needed.
+"""
 from __future__ import annotations
 
 import platform
 import re
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
 import requests
 
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+
+# Blender
 ADDON_FILE_NAME = "blender_mcp_addon.py"
 ADDON_REMOTE_URL = (
     "https://raw.githubusercontent.com/Oli97430/blender-mcp-addon/main/blender_mcp_addon.py"
 )
-BUNDLED_ADDON_PATH = Path(__file__).resolve().parent.parent / "assets" / ADDON_FILE_NAME
+BUNDLED_ADDON_PATH = ASSETS_DIR / ADDON_FILE_NAME
+
+# FreeCAD
+FREECAD_ADDON_FILE = "freecad_mcp_addon.py"
+BUNDLED_FREECAD_PATH = ASSETS_DIR / FREECAD_ADDON_FILE
+
+# GIMP
+GIMP_ADDON_FILE = "gimp_mcp_addon.py"
+BUNDLED_GIMP_PATH = ASSETS_DIR / GIMP_ADDON_FILE
 
 VERSION_RE = re.compile(r'"version"\s*:\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)')
 NAME_RE = re.compile(r'"name"\s*:\s*"([^"]+)"')
@@ -178,6 +193,213 @@ def uninstall_addon(target: BlenderAddonDir) -> bool:
 
 
 def open_addon_dir(target: BlenderAddonDir) -> bool:
+    """Open the addon directory in the OS file explorer."""
+    target.path.mkdir(parents=True, exist_ok=True)
+    try:
+        if platform.system() == "Windows":
+            import os
+            os.startfile(str(target.path))  # type: ignore[attr-defined]
+        elif platform.system() == "Darwin":
+            import subprocess
+            subprocess.Popen(["open", str(target.path)])
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", str(target.path)])
+        return True
+    except Exception:
+        return False
+
+
+# ================================================================ generic multi-app support
+# FreeCAD, GIMP — detect install dirs and install bundled addons.
+# Inkscape & Photoshop are standalone servers (no in-app installation).
+
+
+@dataclass
+class AppAddonDir:
+    """A directory we can install a creative-app MCP addon into."""
+    app: str              # "freecad" | "gimp"
+    label: str            # human label, e.g. "FreeCAD — Macro" or "GIMP 2.10"
+    path: Path            # target directory
+    addon_filename: str   # "freecad_mcp_addon.py" etc.
+    bundled_path: Path    # path to bundled source file in assets/
+    installed_version: str = ""
+    needs_subfolder: bool = False   # GIMP 3.0+ requires plugin in same-name subfolder
+
+    @property
+    def is_installed(self) -> bool:
+        return bool(self.installed_version)
+
+    @property
+    def addon_file(self) -> Path:
+        if self.needs_subfolder:
+            stem = Path(self.addon_filename).stem
+            return self.path / stem / self.addon_filename
+        return self.path / self.addon_filename
+
+
+# ---- FreeCAD discovery
+
+def _freecad_macro_dirs() -> list[Path]:
+    """Possible FreeCAD Macro directories on this OS."""
+    home = Path.home()
+    system = platform.system()
+    candidates: list[Path] = []
+    if system == "Windows":
+        candidates.append(home / "AppData" / "Roaming" / "FreeCAD" / "Macro")
+    elif system == "Darwin":
+        candidates.append(home / "Library" / "Application Support" / "FreeCAD" / "Macro")
+    else:
+        candidates.append(home / ".local" / "share" / "FreeCAD" / "Macro")
+        candidates.append(home / ".FreeCAD" / "Macro")  # legacy
+    return candidates
+
+
+def find_freecad_addon_dirs() -> list[AppAddonDir]:
+    """Detect FreeCAD Macro directories where we can install the addon."""
+    found: list[AppAddonDir] = []
+    for macro_dir in _freecad_macro_dirs():
+        if not macro_dir.exists():
+            # Check if parent exists (FreeCAD is installed but Macro dir not yet created)
+            if macro_dir.parent.exists():
+                found.append(AppAddonDir(
+                    app="freecad",
+                    label=f"FreeCAD  —  {macro_dir}",
+                    path=macro_dir,
+                    addon_filename=FREECAD_ADDON_FILE,
+                    bundled_path=BUNDLED_FREECAD_PATH,
+                    installed_version="",
+                ))
+            continue
+        installed = read_installed_version(macro_dir / FREECAD_ADDON_FILE)
+        found.append(AppAddonDir(
+            app="freecad",
+            label=f"FreeCAD  —  {macro_dir}",
+            path=macro_dir,
+            addon_filename=FREECAD_ADDON_FILE,
+            bundled_path=BUNDLED_FREECAD_PATH,
+            installed_version=installed,
+        ))
+    return found
+
+
+# ---- GIMP discovery
+
+_GIMP_VER_RE = re.compile(r"^(\d+)\.(\d+)$")
+
+
+def _gimp_plugin_roots() -> list[tuple[Path, bool]]:
+    """Return (path, needs_subfolder) for each GIMP version found.
+
+    GIMP 2.x: plug-ins folder accepts loose .py files.
+    GIMP 3.x: each plugin must be in a subfolder with the same name.
+    """
+    home = Path.home()
+    system = platform.system()
+    roots: list[Path] = []
+
+    if system == "Windows":
+        roots.append(home / "AppData" / "Roaming" / "GIMP")
+    elif system == "Darwin":
+        roots.append(home / "Library" / "Application Support" / "GIMP")
+    else:
+        roots.append(home / ".config" / "GIMP")
+        roots.append(home / "snap" / "gimp" / "current" / ".config" / "GIMP")
+        roots.append(home / ".var" / "app" / "org.gimp.GIMP" / "config" / "GIMP")
+
+    results: list[tuple[Path, bool]] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for child in sorted(root.iterdir(), reverse=True):
+            if not child.is_dir() or not _GIMP_VER_RE.match(child.name):
+                continue
+            plugins_dir = child / "plug-ins"
+            major = int(child.name.split(".")[0])
+            needs_sub = major >= 3
+            results.append((plugins_dir, needs_sub))
+    return results
+
+
+def find_gimp_addon_dirs() -> list[AppAddonDir]:
+    """Detect GIMP plug-ins directories where we can install the addon."""
+    found: list[AppAddonDir] = []
+    for plugins_dir, needs_sub in _gimp_plugin_roots():
+        # Check installed version
+        if needs_sub:
+            stem = Path(GIMP_ADDON_FILE).stem
+            target = plugins_dir / stem / GIMP_ADDON_FILE
+        else:
+            target = plugins_dir / GIMP_ADDON_FILE
+        installed = read_installed_version(target) if target.exists() else ""
+        # Derive GIMP version label from path
+        gimp_ver = plugins_dir.parent.name  # "2.10" or "3.0"
+        found.append(AppAddonDir(
+            app="gimp",
+            label=f"GIMP {gimp_ver}  —  {plugins_dir}",
+            path=plugins_dir,
+            addon_filename=GIMP_ADDON_FILE,
+            bundled_path=BUNDLED_GIMP_PATH,
+            installed_version=installed,
+            needs_subfolder=needs_sub,
+        ))
+    return found
+
+
+# ---- generic install / uninstall for AppAddonDir
+
+def install_app_addon(target: AppAddonDir) -> Path:
+    """Copy the bundled addon file into the target directory."""
+    if not target.bundled_path.exists():
+        raise FileNotFoundError(f"Bundled addon not found: {target.bundled_path}")
+
+    if target.needs_subfolder:
+        stem = Path(target.addon_filename).stem
+        dest_dir = target.path / stem
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / target.addon_filename
+    else:
+        target.path.mkdir(parents=True, exist_ok=True)
+        dest = target.path / target.addon_filename
+
+    # Backup existing
+    if dest.exists():
+        try:
+            shutil.copy2(dest, dest.with_suffix(dest.suffix + ".bak"))
+        except OSError:
+            pass
+
+    shutil.copy2(target.bundled_path, dest)
+
+    # Make executable on Linux/macOS (needed for GIMP plugins)
+    if platform.system() != "Windows":
+        import stat
+        dest.chmod(dest.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    target.installed_version = read_installed_version(dest)
+    return dest
+
+
+def uninstall_app_addon(target: AppAddonDir) -> bool:
+    """Remove the addon file from the target directory."""
+    addon = target.addon_file
+    if addon.exists():
+        try:
+            addon.unlink()
+            # Also remove the subfolder if empty (GIMP 3.0+)
+            if target.needs_subfolder and addon.parent.is_dir():
+                try:
+                    addon.parent.rmdir()  # only removes if empty
+                except OSError:
+                    pass
+            target.installed_version = ""
+            return True
+        except OSError:
+            return False
+    return False
+
+
+def open_app_addon_dir(target: AppAddonDir) -> bool:
     """Open the addon directory in the OS file explorer."""
     target.path.mkdir(parents=True, exist_ok=True)
     try:
