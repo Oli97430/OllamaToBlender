@@ -48,7 +48,7 @@ from io import StringIO
 
 _addon_info = {
     "name": "FreeCAD MCP Server",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
 }
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,21 @@ def _tick():
                 try:
                     import PartDesign
                     ns["PartDesign"] = PartDesign
+                except ImportError:
+                    pass
+                try:
+                    import Arch
+                    ns["Arch"] = Arch
+                except ImportError:
+                    pass
+                try:
+                    import BOPTools
+                    ns["BOPTools"] = BOPTools
+                except ImportError:
+                    pass
+                try:
+                    import MeshPart
+                    ns["MeshPart"] = MeshPart
                 except ImportError:
                     pass
 

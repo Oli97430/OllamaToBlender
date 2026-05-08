@@ -32,7 +32,9 @@ from core import (
     StreamStats,
     create_provider,
     detect_categories,
+    detect_freecad_categories,
     is_query_intent,
+    sanitize_freecad_code,
     UpdateInfo,
     available_languages,
     check_for_update,
@@ -70,7 +72,7 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 class UnificationApp(ctk.CTk):
     APP_TITLE = "UNIFICATION"
-    APP_VERSION = "2.1.0"
+    APP_VERSION = "2.2.0"
 
     def __init__(self) -> None:
         super().__init__()
@@ -571,7 +573,8 @@ class UnificationApp(ctk.CTk):
         turn.pack(fill="x", pady=(2, 0))
         self._chat_turns.append(turn)
         if not replay:
-            user_msg: dict[str, Any] = {"role": "user", "content": text}
+            user_msg: dict[str, Any] = {"role": "user", "content": text,
+                                         "target_app": self._target_app}
             if image_b64:
                 user_msg["images"] = [image_b64]
             self._convo_history.append(user_msg)
@@ -622,23 +625,44 @@ class UnificationApp(ctk.CTk):
                 fix_attempt=fix_attempt,
             )
             prompt_mode = "query" if (self.settings.auto_route_prompt and is_query_intent(user_msg)) else "creator"
-            cats = detect_categories(user_msg) if self._target_app == "blender" else []
+            if self._target_app == "blender":
+                cats = detect_categories(user_msg)
+            elif self._target_app == "freecad":
+                cats = detect_freecad_categories(user_msg)
+            else:
+                cats = []
             self.after(
                 0,
                 lambda m=prompt_mode, c=cats, fa=fix_attempt: turn.set_prompt_info(m, c, fa),
             )
 
-            # Inject scene context (Blender only — other apps don't have bpy)
-            if self.settings.inject_scene_context and self._target_app == "blender":
-                try:
-                    scene_result = self.blender.execute(
-                        "result = [o.name + ' (' + o.type + ')' for o in __import__('bpy').data.objects]",
-                        timeout=3.0,
-                    )
-                    if scene_result.ok and scene_result.result:
-                        sys_prompt += f"\n\nCURRENT SCENE OBJECTS: {scene_result.result}"
-                except Exception:
-                    pass
+            # Inject scene context (Blender + FreeCAD)
+            if self.settings.inject_scene_context:
+                if self._target_app == "blender":
+                    try:
+                        scene_result = self.blender.execute(
+                            "result = [o.name + ' (' + o.type + ')' for o in __import__('bpy').data.objects]",
+                            timeout=3.0,
+                        )
+                        if scene_result.ok and scene_result.result:
+                            sys_prompt += f"\n\nCURRENT SCENE OBJECTS: {scene_result.result}"
+                    except Exception:
+                        pass
+                elif self._target_app == "freecad":
+                    try:
+                        ctx_code = (
+                            "import FreeCAD as App\n"
+                            "doc = App.ActiveDocument\n"
+                            "if doc:\n"
+                            "    result = [{'name': o.Name, 'type': o.TypeId} for o in doc.Objects]\n"
+                            "else:\n"
+                            "    result = []"
+                        )
+                        ctx_data = self._tcp_execute_quick(ctx_code, "freecad", timeout=3.0)
+                        if ctx_data:
+                            sys_prompt += f"\n\nCURRENT DOCUMENT OBJECTS: {ctx_data}"
+                    except Exception:
+                        pass
 
             # Trim history down to the configured token budget
             kept, dropped = trim_history(
@@ -747,7 +771,7 @@ class UnificationApp(ctk.CTk):
             return
         result = self.blender.execute(
             code,
-            timeout=120.0,
+            timeout=float(self.settings.timeout_blender),
             with_render=bool(self.render_var.get()) if hasattr(self, "render_var") else False,
         )
         payload = {"result": result.result, "stdout": result.stdout, "message": result.message}
@@ -1826,6 +1850,18 @@ class UnificationApp(ctk.CTk):
                                             tooltip=t("settings.max_fix.tooltip"))
         self.s_num_ctx = self._setting_row(sect, t("settings.num_ctx"), str(self.settings.num_ctx),
                                             tooltip=t("settings.num_ctx.tooltip"))
+
+        # Per-app execution timeouts
+        self.s_timeout_blender = self._setting_row(sect, "Timeout Blender (s)", str(self.settings.timeout_blender),
+                                                    tooltip="Max seconds for Blender script execution")
+        self.s_timeout_freecad = self._setting_row(sect, "Timeout FreeCAD (s)", str(self.settings.timeout_freecad),
+                                                    tooltip="Max seconds for FreeCAD script execution")
+        self.s_timeout_gimp = self._setting_row(sect, "Timeout GIMP (s)", str(self.settings.timeout_gimp),
+                                                 tooltip="Max seconds for GIMP script execution")
+        self.s_timeout_inkscape = self._setting_row(sect, "Timeout Inkscape (s)", str(self.settings.timeout_inkscape),
+                                                     tooltip="Max seconds for Inkscape script execution")
+        self.s_timeout_photoshop = self._setting_row(sect, "Timeout Photoshop (s)", str(self.settings.timeout_photoshop),
+                                                      tooltip="Max seconds for Photoshop script execution")
         ctk.CTkLabel(sect, text="").pack(pady=(0, 8))
 
         # --- Appearance
@@ -1991,6 +2027,12 @@ class UnificationApp(ctk.CTk):
             self.settings.max_fix_attempts = max(0, int(self.s_max_fix.get().strip() or 1))
             self.settings.num_ctx = max(2048, int(self.s_num_ctx.get().strip() or 8192))
             self.settings.inject_scene_context = bool(self.s_scene_ctx.get())
+            # Per-app timeouts
+            self.settings.timeout_blender = max(10, int(self.s_timeout_blender.get().strip() or 120))
+            self.settings.timeout_freecad = max(10, int(self.s_timeout_freecad.get().strip() or 180))
+            self.settings.timeout_gimp = max(10, int(self.s_timeout_gimp.get().strip() or 120))
+            self.settings.timeout_inkscape = max(10, int(self.s_timeout_inkscape.get().strip() or 120))
+            self.settings.timeout_photoshop = max(10, int(self.s_timeout_photoshop.get().strip() or 120))
         except ValueError as exc:
             Toast(self, t("toast.invalid_value", error=str(exc)), kind="err")
             return
@@ -2212,16 +2254,46 @@ class UnificationApp(ctk.CTk):
 
     # ---- target-app detection & generic TCP execution ----
 
+    # Domain-specific keywords that imply a target app (no explicit app name needed)
+    _APP_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
+        "freecad": (
+            "cad", "parametric", "part design", "partdesign", "sketch constraint",
+            "step file", "iges", "brep", "freecad", "free cad",
+            "pad ", "pocket", "chamfer", "fillet edge", "draft wire",
+            "cao", "conception",
+        ),
+        "gimp": (
+            "gimp", "layer", "brush", "filter", "gaussian blur", "sharpen",
+            "color curve", "levels", "retouche", "image editing",
+            "calque", "filtre", "pinceau",
+        ),
+        "inkscape": (
+            "inkscape", "svg", "vector", "bezier", "path ", "stroke",
+            "vector graphic", "vectoriel", "trace",
+        ),
+        "photoshop": (
+            "photoshop", "psd", "adjustment layer", "smart object",
+            "content aware", "healing brush", "liquify",
+        ),
+        "blender": (
+            "blender", "bpy", "mesh", "sculpt", "render", "cycles", "eevee",
+            "armature", "bone", "keyframe", "material node", "shader",
+            "geometry node", "particle", "rigid body", "grease pencil",
+        ),
+    }
+
     def _detect_target_app(self, user_msg: str = "") -> str:
         """Determine which creative app to target based on online status + keywords.
 
         Priority:
-        1. Explicit keyword in user message
-        2. First online creative app (Blender checked first)
-        3. Default to blender
+        1. Explicit app name in user message
+        2. Domain-specific keywords (CAD terms -> FreeCAD, SVG -> Inkscape, etc.)
+        3. First online creative app (Blender checked first)
+        4. Default to blender
         """
         lower = user_msg.lower()
-        # Explicit keyword match — check all 5 apps
+
+        # 1. Explicit app name match
         if "freecad" in lower or "free cad" in lower:
             return "freecad"
         if "inkscape" in lower:
@@ -2232,7 +2304,27 @@ class UnificationApp(ctk.CTk):
             return "gimp"
         if "blender" in lower:
             return "blender"
-        # Check which apps are online (pill state)
+
+        # 2. Domain-specific keyword scoring
+        scores: dict[str, int] = {}
+        for app_key, keywords in self._APP_DOMAIN_KEYWORDS.items():
+            score = sum(1 for kw in keywords if kw in lower)
+            if score > 0:
+                scores[app_key] = score
+        if scores:
+            best = max(scores, key=scores.get)  # type: ignore[arg-type]
+            # Only use domain detection if the best app is online
+            pill = self._app_pills.get(best) if best != "blender" else None
+            blender_pill = self.pill_blender
+            if best == "blender" and blender_pill.state == "ok":
+                return "blender"
+            if pill and pill.state == "ok":
+                return best
+            # If best isn't online but has strong signal, still pick it
+            if scores[best] >= 2:
+                return best
+
+        # 3. Check which apps are online (pill state)
         if self.pill_blender.state == "ok":
             return "blender"
         for app_key in ("freecad", "gimp", "inkscape", "photoshop"):
@@ -2272,6 +2364,39 @@ class UnificationApp(ctk.CTk):
         info = CREATIVE_APPS.get(app)
         return info["port"] if info else 9876
 
+    def _target_timeout(self, app: str) -> float:
+        """Return the configured timeout for the given app key."""
+        key = f"timeout_{app}"
+        return float(getattr(self.settings, key, 120))
+
+    def _tcp_execute_quick(self, code: str, app: str, timeout: float = 3.0) -> Any:
+        """Send code to a creative app via TCP and return the result (or None on failure).
+
+        Used for scene-context queries and viewport previews.
+        """
+        port = self._target_port(app)
+        host = self.settings.blender_host
+        request = json.dumps({"type": "execute", "code": code})
+        try:
+            with socket.create_connection((host, port), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                sock.sendall(request.encode("utf-8") + b"\x00")
+                buf = bytearray()
+                while True:
+                    chunk = sock.recv(8192)
+                    if not chunk:
+                        break
+                    buf.extend(chunk)
+                    if b"\x00" in chunk:
+                        break
+            raw = bytes(buf).rstrip(b"\x00").decode("utf-8", errors="replace")
+            data = json.loads(raw) if raw else {}
+            if data.get("status") == "ok":
+                return data.get("result")
+        except Exception:
+            pass
+        return None
+
     def _target_label(self, app: str) -> str:
         """Human-readable label for the target app."""
         labels = {"blender": "Blender", "freecad": "FreeCAD", "gimp": "GIMP",
@@ -2283,15 +2408,31 @@ class UnificationApp(ctk.CTk):
         app_label = self._target_label(app)
         port = self._target_port(app)
         host = self.settings.blender_host  # same host for all apps
+        timeout = self._target_timeout(app)
+
+        # Pre-flight: apply FreeCAD sanitizer
+        if app == "freecad":
+            code = sanitize_freecad_code(code)
+
+        # Pre-flight lint — catch syntax errors before a TCP round-trip
+        issues = lint_python(code)
+        errors = [i for i in issues if i.level == "error"]
+        if errors:
+            msg = "Syntax check failed:\n" + "\n".join(i.format() for i in errors)
+            payload = {"result": None, "stdout": "", "message": msg}
+            self.after(0, turn.set_exec_result, "error", payload, app_label)
+            self.after(0, lambda: self._log(f"{app}: lint failure"))
+            self.after(0, lambda e=msg: self._maybe_auto_fix(turn, e, app_label))
+            return
+
         request = json.dumps({"type": "execute", "code": code})
 
         backoff = 1.0
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
-                with socket.create_connection((host, port), timeout=120.0) as sock:
-                    sock.settimeout(120.0)
-                    sock.sendall(request.encode("utf-8") + b"\x00")
+                with socket.create_connection((host, port), timeout=timeout) as sock:
+                    sock.settimeout(timeout)
                     buf = bytearray()
                     _MAX_RESP = 50 * 1024 * 1024  # 50 MB cap (same as BlenderClient)
                     while True:
@@ -2311,6 +2452,19 @@ class UnificationApp(ctk.CTk):
                     "message": data.get("message", ""),
                 }
                 status = data.get("status", "error")
+                # FreeCAD viewport preview (opt-in, same as Blender render toggle)
+                if (
+                    status == "ok"
+                    and app == "freecad"
+                    and hasattr(self, "render_var")
+                    and self.render_var.get()
+                ):
+                    preview = self._freecad_viewport_preview()
+                    if preview:
+                        if not isinstance(result_payload["result"], dict):
+                            result_payload["result"] = {"_otb_user_result": result_payload["result"]}
+                        result_payload["result"]["_otb_render"] = preview
+
                 self.after(0, turn.set_exec_result, status, result_payload, app_label)
                 self.after(0, self._refresh_status)
                 self.after(0, lambda: self._log(f"{app}: {status}"))
@@ -2335,6 +2489,22 @@ class UnificationApp(ctk.CTk):
                           "message": f"ConnectionRefusedError after 3 attempts: {last_exc}"}
         self.after(0, turn.set_exec_result, "transport_error", result_payload, app_label)
         self.after(0, lambda: self._log(f"{app}: connection refused"))
+
+    def _freecad_viewport_preview(self) -> str | None:
+        """Capture the FreeCAD 3D viewport as a base64 PNG (or None on failure)."""
+        preview_code = (
+            "import FreeCADGui\n"
+            "import tempfile, os, base64\n"
+            "view = FreeCADGui.ActiveDocument.ActiveView if FreeCADGui.ActiveDocument else None\n"
+            "if view:\n"
+            "    path = os.path.join(tempfile.gettempdir(), '_unification_preview.png')\n"
+            "    view.saveImage(path, 720, 480, 'Current')\n"
+            "    with open(path, 'rb') as f:\n"
+            "        result = base64.b64encode(f.read()).decode('ascii')\n"
+            "else:\n"
+            "    result = None\n"
+        )
+        return self._tcp_execute_quick(preview_code, "freecad", timeout=5.0)
 
     def _poll_status_loop(self) -> None:
         # Skip polling when window is minimized or iconified

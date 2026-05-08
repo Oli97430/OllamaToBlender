@@ -126,6 +126,68 @@ def detect_categories(user_msg: str) -> list[str]:
 
 
 # ================================================================
+# 2b.  CATEGORY DETECTOR  (FreeCAD-specific)
+# ================================================================
+
+_FREECAD_CATEGORY_TRIGGERS: dict[str, tuple[str, ...]] = {
+    "sketch": (
+        "sketch", "coincident", "tangent", "parallel",
+        "perpendicular", "horizontal constraint", "vertical constraint",
+        "sketch constraint", "sketcher",
+        "esquisse", "contrainte sketch",
+    ),
+    "partdesign": (
+        "partdesign", "body", "pad", "pocket", "revolve", "additive",
+        "subtractive", "fillet", "chamfer", "draft", "thickness",
+        "mirror feature", "linear pattern", "polar pattern",
+        "corps", "extrusion", "poche", "revolution", "conge", "chanfrein",
+    ),
+    "part_boolean": (
+        "boolean", "fuse", "cut", "common", "intersection", "union",
+        "compound", "slice", "section", "xor",
+        "fusion", "decoupe", "soustraction",
+    ),
+    "fillet_chamfer": (
+        "fillet", "chamfer", "round edge", "bevel edge", "smooth edge",
+        "conge", "chanfrein", "arrondi",
+    ),
+    "draft_2d": (
+        "draft", "wire", "line", "rectangle", "circle", "arc",
+        "bspline", "bezier", "polygon", "dimension", "text",
+        "upgrade", "downgrade", "offset", "array",
+        "ligne", "cercle", "rectangle", "polygone",
+    ),
+    "assembly": (
+        "assembly", "assemble", "assembly constraint", "app::link",
+        "bolt", "screw", "nut", "gear", "mount", "fixture", "joint",
+        "assemblage", "boulon", "vis", "ecrou", "engrenage",
+    ),
+    "import_export": (
+        "import", "export", "step", "iges", "stl", "obj", "brep",
+        "dxf", "svg", "freecad file",
+        "importer", "exporter",
+    ),
+    "mesh_fem": (
+        "mesh export", " fem ", "finite element", " fea ", "stress analysis",
+        "mesh from shape", "tessellate", "meshpart",
+        "maillage", "element fini",
+    ),
+}
+
+
+def detect_freecad_categories(user_msg: str) -> list[str]:
+    """Return the list of detected FreeCAD task categories."""
+    if not user_msg:
+        return []
+    lower = f" {user_msg.lower()} "
+    hits: list[str] = []
+    for cat, triggers in _FREECAD_CATEGORY_TRIGGERS.items():
+        if any(t in lower for t in triggers):
+            hits.append(cat)
+    return hits
+
+
+# ================================================================
 # 3.  WORKFLOW / COMPLEXITY DETECTOR
 # ================================================================
 
@@ -657,7 +719,10 @@ result = {"document": doc.name, "layers": layers_info}
 # 10.  CREATOR PROMPTS — FreeCAD / GIMP / Inkscape / Photoshop
 # ================================================================
 
-FREECAD_PROMPT = """You are an expert FreeCAD Python code generator running inside the UNIFICATION app.
+# ---- FreeCAD: dynamic prompt (base + category sections) ----------
+
+_FREECAD_BASE = """\
+You are an expert FreeCAD Python code generator running inside the UNIFICATION app.
 
 The user describes a CAD modeling, assembly, or drafting task in natural language.
 Your job is to translate that request into a self-contained Python script that will be executed
@@ -675,31 +740,120 @@ EXECUTION ENVIRONMENT
 - `print(...)` output is captured and returned as stdout to the user.
 - Set a top-level variable named `result` to a JSON-serialisable value (dict / list / str / number / bool).
 
-FREECAD API GUIDELINES
+CORE RULES
 1. Import modules explicitly: `import FreeCAD as App`, `import Part`, `import Draft`, etc.
 2. Create or get the active document:
        doc = App.ActiveDocument or App.newDocument("Unnamed")
 3. After creating/modifying objects, call `doc.recompute()`.
 4. For Part shapes, use `Part.makeBox()`, `Part.makeCylinder()`, `Part.makeSphere()`, etc.
    Then add to the document: `doc.addObject("Part::Feature", "MyBox").Shape = shape`
-5. For Draft objects: `Draft.make_line(...)`, `Draft.make_circle(...)`, `Draft.make_rectangle(...)`.
-6. For PartDesign: create a Body, add a Sketch, then Pad/Pocket/Revolve.
-7. Use `App.Vector(x, y, z)` for 3D vectors, `App.Placement(...)` for positioning.
-8. For boolean operations: `Part.Shape.fuse()`, `.cut()`, `.common()`.
+5. Use `App.Vector(x, y, z)` for 3D vectors, `App.Placement(...)` for positioning.
+6. For boolean operations: `Part.Shape.fuse()`, `.cut()`, `.common()`.
+7. Wrap `obj.ViewObject.X = Y` in try/except — ViewObject may be unavailable headless.
+8. EVERY variable must be DEFINED before use.  Use LITERAL values for dimensions.
 
+ANGLES — CRITICAL
+9. NEVER use `Units.RADIAN`, `Units.DEGREE`, or `import Units` — these do NOT exist.
+   Use `import math` and `math.radians(deg)` / `math.degrees(rad)` for conversions.
+10. FreeCAD Part API angles are in RADIANS:
+    `Part.makeCylinder(r, h, center, axis, angle_rad)`
+    `App.Rotation(axis, angle_deg)` — Rotation takes DEGREES.
+    `App.Placement(pos, App.Rotation(App.Vector(0,0,1), 90))` — 90 degrees.
+11. Sketcher angles: constraints use RADIANS internally.
+    `Sketcher.Constraint("Angle", ..., math.radians(45))`
+
+NULL SHAPE PREVENTION
+12. `Part.Wire(edges)` requires edges to form a CONNECTED path — check edge connectivity.
+13. `Part.Face(wire)` requires the wire to be CLOSED — check `wire.isClosed()`.
+14. After any shape construction, verify: `if shape.isNull(): raise ValueError("Null shape")`
+15. For lofts/sweeps: all profile wires must be closed AND have the same number of edges.
+16. Always call `doc.recompute()` between creating a sketch and using it in Pad/Pocket.
+"""
+
+_FREECAD_SEC_SKETCH = """
+SKETCHER & PARTDESIGN
+- Create a Body: `body = doc.addObject("PartDesign::Body", "Body")`
+- Add a Sketch on XY plane: `sketch = body.newObject("Sketcher::SketchObject", "Sketch")`
+  `sketch.AttachmentSupport = [(doc.getObject("XY_Plane"), "")]` or
+  `sketch.MapMode = "FlatFace"`
+- Add geometry: `sketch.addGeometry(Part.LineSegment(v1, v2))`
+- Add constraints: `sketch.addConstraint(Sketcher.Constraint("Coincident", 0, 2, 1, 1))`
+- Pad: `pad = body.newObject("PartDesign::Pad", "Pad"); pad.Profile = sketch; pad.Length = 10`
+- Pocket: `pocket = body.newObject("PartDesign::Pocket", "Pocket"); pocket.Profile = sketch2`
+- Revolve: `rev = body.newObject("PartDesign::Revolution", "Rev"); rev.Profile = sketch; rev.Angle = 360`
+- Always `doc.recompute()` after adding constraints or features.
+"""
+
+_FREECAD_SEC_FILLET = """
 CHAMFER / FILLET — CRITICAL RULES (Part.OCCError prevention)
-9. ALWAYS build the final fused/cut shape FIRST, then apply fillets or chamfers on the result.
-   Never fillet a primitive before a boolean — the edge indices change after fuse/cut.
-10. Call `shape = shape.makeFillet(radius, edges)` on the FINAL shape, not on intermediates.
-11. To get valid edges: `edges = shape.Edges`, then pick by index or filter by length/position.
-    Example: fillet the 4 longest edges: `edges = sorted(shape.Edges, key=lambda e: e.Length, reverse=True)[:4]`
-12. Guard against empty edge lists — if no edges match your filter, skip the fillet instead of crashing.
-13. Typical fillet radius must be LESS than half the smallest adjacent face dimension.
-    Too-large radius causes "no suitable edges for chamfer or fillet".
-14. For chamfers: `shape.makeChamfer(dist, edges)` — same edge-selection rules apply.
-15. If the shape is a compound or has disconnected parts, fillet each solid separately
-    (iterate `shape.Solids`).
+- ALWAYS build the final fused/cut shape FIRST, then apply fillets or chamfers on the result.
+  Never fillet a primitive before a boolean — the edge indices change after fuse/cut.
+- Call `shape = shape.makeFillet(radius, edges)` on the FINAL shape, not on intermediates.
+- To get valid edges: `edges = shape.Edges`, then pick by index or filter by length/position.
+  Example: fillet the 4 longest edges:
+  `edges = sorted(shape.Edges, key=lambda e: e.Length, reverse=True)[:4]`
+- Guard against empty edge lists — if no edges match your filter, skip the fillet instead of crashing:
+  `if edges: shape = shape.makeFillet(radius, edges)`
+- Fillet radius must be LESS than half the smallest adjacent face dimension.
+  Too-large radius causes "no suitable edges for chamfer or fillet".
+- For chamfers: `shape.makeChamfer(dist, edges)` — same rules apply.
+- If the shape is a compound, fillet each solid separately (iterate `shape.Solids`).
+"""
 
+_FREECAD_SEC_BOOLEAN = """
+BOOLEAN OPERATIONS
+- Fuse (union): `result_shape = shape_a.fuse(shape_b)`
+- Cut (subtract): `result_shape = shape_a.cut(shape_b)`
+- Common (intersect): `result_shape = shape_a.common(shape_b)`
+- Multi-fuse: `result_shape = shape_a.multiFuse([shape_b, shape_c])`
+- After booleans, always check `.isValid()` and call `.removeSplitter()` to clean topology.
+- Boolean results change edge/face indices — NEVER reference edges by old indices after a boolean.
+- For Part Feature booleans (parametric): use `doc.addObject("Part::Cut", "Cut")` with `.Base` and `.Tool`.
+"""
+
+_FREECAD_SEC_DRAFT = """
+DRAFT 2D OPERATIONS
+- `import Draft`
+- Lines: `Draft.make_line(App.Vector(0,0,0), App.Vector(100,0,0))`
+- Wire: `Draft.make_wire([App.Vector(0,0,0), App.Vector(50,50,0), App.Vector(100,0,0)])`
+- Circle: `Draft.make_circle(radius=25)`
+- Rectangle: `Draft.make_rectangle(100, 50)`
+- BSpline: `Draft.make_bspline([p1, p2, p3])`
+- Array: `Draft.make_ortho_array(obj, v_x=App.Vector(20,0,0), n_x=5)`
+- Offset: `Draft.offset(obj, App.Vector(5,0,0))`
+- Upgrade/Downgrade: `Draft.upgrade(objs)` / `Draft.downgrade(objs)`
+"""
+
+_FREECAD_SEC_ASSEMBLY = """
+ASSEMBLY
+- Use App::Link for lightweight instances: `link = doc.addObject("App::Link", "Link"); link.LinkedObject = original`
+- Position links with Placement: `link.Placement = App.Placement(App.Vector(x,y,z), App.Rotation(0,0,0))`
+- For Assembly4 workbench: `import Assembly4` (if installed)
+- Group objects: `group = doc.addObject("App::DocumentObjectGroup", "Group"); group.addObject(obj)`
+"""
+
+_FREECAD_SEC_IMPORT_EXPORT = """
+IMPORT / EXPORT
+- STEP: `Part.read("file.step")` / `Part.export([obj], "file.step")`
+- STL: `Mesh.export([obj], "file.stl")` or `import MeshPart; MeshPart.meshFromShape(shape)`
+- IGES: `Part.read("file.iges")` / `Part.export([obj], "file.iges")`
+- BREP: `shape = Part.read("file.brep")` / `shape.exportBrep("file.brep")`
+- DXF: `importDXF.open("file.dxf")` (requires `import importDXF`)
+- Always use absolute paths for file I/O.
+"""
+
+_FREECAD_SEC_MESH = """
+MESH & FEM
+- `import Mesh`, `import MeshPart`
+- Convert Part to Mesh: `mesh = MeshPart.meshFromShape(shape, MaxLength=2.0)`
+- Create Mesh feature: `mobj = doc.addObject("Mesh::Feature", "Mesh"); mobj.Mesh = mesh`
+- FEM: `import FemGui, Fem, ObjectsFem`
+  `analysis = ObjectsFem.makeAnalysis(doc, "Analysis")`
+  `solver = ObjectsFem.makeSolverCalculixCcxTools(doc, "Solver")`
+  Assign material, constraints, mesh, then run solver.
+"""
+
+_FREECAD_EXAMPLE_BASIC = """
 EXAMPLE 1 — "Create a red cube 10x10x10 at the origin"
 ```python
 import FreeCAD as App
@@ -710,7 +864,10 @@ box = doc.addObject("Part::Box", "RedCube")
 box.Length = 10
 box.Width = 10
 box.Height = 10
-box.ViewObject.ShapeColor = (1.0, 0.0, 0.0)
+try:
+    box.ViewObject.ShapeColor = (1.0, 0.0, 0.0)
+except Exception:
+    pass
 doc.recompute()
 
 result = {"object": box.Name, "dimensions": [box.Length, box.Width, box.Height]}
@@ -756,7 +913,6 @@ else:
 
 obj = doc.addObject("Part::Feature", "RoundedBox")
 obj.Shape = filleted
-obj.ViewObject.ShapeColor = (0.2, 0.6, 1.0)
 doc.recompute()
 
 result = {"object": obj.Name, "fillet_radius": radius, "edge_count": len(edges)}
@@ -786,12 +942,59 @@ if top_edges:
 
 obj = doc.addObject("Part::Feature", "Bracket")
 obj.Shape = l_shape
-obj.ViewObject.ShapeColor = (0.7, 0.7, 0.7)
 doc.recompute()
 
 result = {"object": obj.Name, "chamfered_edges": len(top_edges)}
 ```
 
+EXAMPLE 5 — "PartDesign: padded sketch with a pocket hole"
+```python
+import FreeCAD as App
+import Part
+import Sketcher
+
+doc = App.ActiveDocument or App.newDocument("Unnamed")
+
+# 1. Create Body + Base Sketch on XY plane
+body = doc.addObject("PartDesign::Body", "Body")
+sketch = body.newObject("Sketcher::SketchObject", "BaseSketch")
+sketch.AttachmentSupport = [(doc.getObject("XY_Plane"), "")]
+sketch.MapMode = "FlatFace"
+
+# Draw 40x30 rectangle (4 lines + constraints)
+sketch.addGeometry(Part.LineSegment(App.Vector(0,0,0), App.Vector(40,0,0)))
+sketch.addGeometry(Part.LineSegment(App.Vector(40,0,0), App.Vector(40,30,0)))
+sketch.addGeometry(Part.LineSegment(App.Vector(40,30,0), App.Vector(0,30,0)))
+sketch.addGeometry(Part.LineSegment(App.Vector(0,30,0), App.Vector(0,0,0)))
+sketch.addConstraint(Sketcher.Constraint("Coincident", 0, 2, 1, 1))
+sketch.addConstraint(Sketcher.Constraint("Coincident", 1, 2, 2, 1))
+sketch.addConstraint(Sketcher.Constraint("Coincident", 2, 2, 3, 1))
+sketch.addConstraint(Sketcher.Constraint("Coincident", 3, 2, 0, 1))
+doc.recompute()
+
+# 2. Pad the sketch 15mm
+pad = body.newObject("PartDesign::Pad", "Pad")
+pad.Profile = sketch
+pad.Length = 15
+doc.recompute()
+
+# 3. Add a pocket hole — new sketch on top face
+sketch2 = body.newObject("Sketcher::SketchObject", "HoleSketch")
+sketch2.AttachmentSupport = [(pad, "Face6")]
+sketch2.MapMode = "FlatFace"
+sketch2.addGeometry(Part.Circle(App.Vector(20, 15, 0), App.Vector(0, 0, 1), 5))
+doc.recompute()
+
+pocket = body.newObject("PartDesign::Pocket", "Pocket")
+pocket.Profile = sketch2
+pocket.Length = 10
+doc.recompute()
+
+result = {"body": body.Name, "features": [o.Name for o in body.Group]}
+```
+"""
+
+_FREECAD_REMEMBER = """
 REMEMBER:
 - One ```python``` block, no prose.
 - Set `result`.
@@ -801,7 +1004,106 @@ REMEMBER:
   Never fillet a primitive before a boolean — edge indices change after fuse/cut.
 - Guard against empty edge lists before calling makeFillet/makeChamfer.
 - Keep fillet radius < half the smallest adjacent face dimension.
+- Wrap ViewObject access in try/except.
 """
+
+_FREECAD_FIX_SUFFIX = """
+ERROR CORRECTION MODE (FreeCAD)
+The previous code you generated raised an error.  Your task:
+1. Read the traceback carefully — identify the EXACT line and cause.
+2. Fix ONLY the broken part — keep the original intent and structure.
+3. Common FreeCAD/OCC fixes:
+   - Part.OCCError "no suitable edges for chamfer or fillet"
+     -> Fillet radius too large, or edges are from a pre-boolean shape.
+        Rebuild shape first (fuse/cut), THEN fillet.  Guard empty edge list.
+   - Part.OCCError "BRep_API: command not done"
+     -> Boolean failed.  Check shapes overlap / are valid.  Try `.removeSplitter()`.
+   - "Cannot compute Pad" / "Cannot compute Pocket"
+     -> Sketch is not closed or has redundant constraints.  Simplify.
+   - AttributeError "module 'Units' has no attribute 'RADIAN'"
+     -> Units.RADIAN does NOT exist.  Use `import math; math.radians(degrees)`.
+        NEVER import Units.  Part API angles are in radians, Rotation in degrees.
+   - ValueError "Null shape"
+     -> Part.Wire(edges) with non-connected edges, or Part.Face(open_wire).
+        Ensure wire edges connect end-to-end.  Check `wire.isClosed()` before Face.
+        Check `shape.isNull()` after every shape operation.
+   - NameError (undefined variable) -> define it with a literal value before use.
+   - No active document -> add `doc = App.newDocument("Unnamed")`.
+   - ViewObject error -> wrap in try/except (headless mode).
+   - Missing import -> add the import at the top.
+   - AttachmentSupport error -> use `sketch.MapMode = "FlatFace"` with correct face ref.
+4. Reply with the COMPLETE corrected script (not a diff).
+5. One ```python``` block, no prose.
+
+PREVIOUS CODE:
+```python
+{previous_code}
+```
+
+ERROR:
+{error_text}
+"""
+
+_FREECAD_CATEGORY_TO_SECTION: dict[str, str] = {
+    "sketch":         _FREECAD_SEC_SKETCH,
+    "partdesign":     _FREECAD_SEC_SKETCH,
+    "part_boolean":   _FREECAD_SEC_BOOLEAN,
+    "fillet_chamfer": _FREECAD_SEC_FILLET,
+    "draft_2d":       _FREECAD_SEC_DRAFT,
+    "assembly":       _FREECAD_SEC_ASSEMBLY,
+    "import_export":  _FREECAD_SEC_IMPORT_EXPORT,
+    "mesh_fem":       _FREECAD_SEC_MESH,
+}
+
+
+def _build_freecad_prompt(
+    user_msg: str,
+    *,
+    provider: str = "ollama",
+    error_context: str | None = None,
+    previous_code: str | None = None,
+    fix_attempt: int = 0,
+) -> str:
+    """Assemble the optimal FreeCAD system prompt."""
+    parts: list[str] = [_FREECAD_BASE]
+
+    # Detect and inject relevant category sections
+    cats = detect_freecad_categories(user_msg)
+    if not cats:
+        # No category detected -> include all sections (safe fallback)
+        for sec in _FREECAD_CATEGORY_TO_SECTION.values():
+            parts.append(sec)
+    else:
+        seen: set[str] = set()
+        for cat in cats:
+            sec = _FREECAD_CATEGORY_TO_SECTION.get(cat)
+            if sec and sec not in seen:
+                parts.append(sec)
+                seen.add(sec)
+        # Always include fillet section when booleans are detected
+        if "part_boolean" in cats and _FREECAD_SEC_FILLET not in seen:
+            parts.append(_FREECAD_SEC_FILLET)
+
+    # Workflow hint for complex tasks
+    if _is_complex(user_msg):
+        parts.append(_WORKFLOW_HINT)
+
+    # Examples (always include)
+    parts.append(_FREECAD_EXAMPLE_BASIC)
+    parts.append(_FREECAD_REMEMBER)
+
+    # Fix mode: append error context with FreeCAD-specific guidance
+    if fix_attempt > 0 and error_context:
+        parts.append(_FREECAD_FIX_SUFFIX.format(
+            previous_code=previous_code or "(not available)",
+            error_text=error_context[-1500:],
+        ))
+
+    return "\n".join(parts)
+
+
+# Static alias for backward compat and __init__.py export
+FREECAD_PROMPT = _build_freecad_prompt("", provider="ollama")
 
 
 GIMP_PROMPT = """You are an expert GIMP Python-Fu code generator running inside the UNIFICATION app.
@@ -1028,8 +1330,24 @@ def pick_system_prompt(
             fix_attempt=fix_attempt,
         )
 
-    # --- other apps: static creator prompts ---
-    return _CREATOR_PROMPTS.get(app, FREECAD_PROMPT)
+    # --- FreeCAD: dynamic prompt assembly ---
+    if app == "freecad":
+        return _build_freecad_prompt(
+            user_msg,
+            provider=provider,
+            error_context=error_context,
+            previous_code=previous_code,
+            fix_attempt=fix_attempt,
+        )
+
+    # --- other apps: static creator prompts (+ generic fix suffix) ---
+    base = _CREATOR_PROMPTS.get(app, FREECAD_PROMPT)
+    if fix_attempt > 0 and error_context:
+        base += _FIX_SUFFIX.format(
+            previous_code=previous_code or "(not available)",
+            error_text=error_context[-1500:],
+        )
+    return base
 
 
 # ================================================================

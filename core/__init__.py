@@ -23,6 +23,7 @@ from .blender_client import (
     wrap_with_render,
     wrap_with_view3d_override,
 )
+from .freecad_sanitizer import sanitize_freecad_code
 from .i18n import LANGUAGE_LABELS, available_languages, get_language, set_language, t
 from .lint import LintIssue, lint_python
 from .llm_providers import (
@@ -57,6 +58,7 @@ from .system_prompt import (
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_QUERY,
     detect_categories,
+    detect_freecad_categories,
     is_query_intent,
     pick_system_prompt,
 )
@@ -105,6 +107,8 @@ __all__ = [
     "open_app_addon_dir",
     "pick_system_prompt",
     "ping_tcp_addon",
+    "sanitize_freecad_code",
+    "detect_freecad_categories",
     "read_bundled_version",
     "save_history",
     "set_language",

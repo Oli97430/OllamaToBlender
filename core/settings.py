@@ -43,6 +43,13 @@ class Settings:
     num_ctx: int = 8192
     inject_scene_context: bool = True
 
+    # Per-app execution timeouts (seconds)
+    timeout_blender: int = 120
+    timeout_freecad: int = 180
+    timeout_gimp: int = 120
+    timeout_inkscape: int = 120
+    timeout_photoshop: int = 120
+
     # Update check
     check_for_updates: bool = True
 
