@@ -687,6 +687,19 @@ FREECAD API GUIDELINES
 7. Use `App.Vector(x, y, z)` for 3D vectors, `App.Placement(...)` for positioning.
 8. For boolean operations: `Part.Shape.fuse()`, `.cut()`, `.common()`.
 
+CHAMFER / FILLET — CRITICAL RULES (Part.OCCError prevention)
+9. ALWAYS build the final fused/cut shape FIRST, then apply fillets or chamfers on the result.
+   Never fillet a primitive before a boolean — the edge indices change after fuse/cut.
+10. Call `shape = shape.makeFillet(radius, edges)` on the FINAL shape, not on intermediates.
+11. To get valid edges: `edges = shape.Edges`, then pick by index or filter by length/position.
+    Example: fillet the 4 longest edges: `edges = sorted(shape.Edges, key=lambda e: e.Length, reverse=True)[:4]`
+12. Guard against empty edge lists — if no edges match your filter, skip the fillet instead of crashing.
+13. Typical fillet radius must be LESS than half the smallest adjacent face dimension.
+    Too-large radius causes "no suitable edges for chamfer or fillet".
+14. For chamfers: `shape.makeChamfer(dist, edges)` — same edge-selection rules apply.
+15. If the shape is a compound or has disconnected parts, fillet each solid separately
+    (iterate `shape.Solids`).
+
 EXAMPLE 1 — "Create a red cube 10x10x10 at the origin"
 ```python
 import FreeCAD as App
@@ -721,11 +734,73 @@ doc.recompute()
 result = {"object": obj.Name}
 ```
 
+EXAMPLE 3 — "Create a box with rounded edges (fillet)"
+```python
+import FreeCAD as App
+import Part
+
+doc = App.ActiveDocument or App.newDocument("Unnamed")
+
+# 1. Build the final shape FIRST
+box = Part.makeBox(40, 30, 20)
+
+# 2. Select edges to fillet — here all 12 edges
+edges = box.Edges
+radius = 3  # must be < half the smallest face dimension (20/2 = 10)
+
+# 3. Apply fillet on the final shape, guard against empty edges
+if edges:
+    filleted = box.makeFillet(radius, edges)
+else:
+    filleted = box
+
+obj = doc.addObject("Part::Feature", "RoundedBox")
+obj.Shape = filleted
+obj.ViewObject.ShapeColor = (0.2, 0.6, 1.0)
+doc.recompute()
+
+result = {"object": obj.Name, "fillet_radius": radius, "edge_count": len(edges)}
+```
+
+EXAMPLE 4 — "Create a bracket: L-shape with a mounting hole and chamfered top edges"
+```python
+import FreeCAD as App
+import Part
+
+doc = App.ActiveDocument or App.newDocument("Unnamed")
+
+# 1. Build L-shape by fusing two boxes
+base = Part.makeBox(60, 40, 5)
+wall = Part.makeBox(5, 40, 40)
+l_shape = base.fuse(wall)
+
+# 2. Cut a mounting hole
+hole = Part.makeCylinder(5, 10, App.Vector(30, 20, -1), App.Vector(0, 0, 1))
+l_shape = l_shape.cut(hole)
+
+# 3. Chamfer only the top edges of the wall (Z > 30)
+top_edges = [e for e in l_shape.Edges
+             if all(v.Z > 30 for v in e.Vertexes) and e.Length > 1]
+if top_edges:
+    l_shape = l_shape.makeChamfer(2, top_edges)
+
+obj = doc.addObject("Part::Feature", "Bracket")
+obj.Shape = l_shape
+obj.ViewObject.ShapeColor = (0.7, 0.7, 0.7)
+doc.recompute()
+
+result = {"object": obj.Name, "chamfered_edges": len(top_edges)}
+```
+
 REMEMBER:
 - One ```python``` block, no prose.
 - Set `result`.
 - Always call `doc.recompute()` after changes.
 - Prefer Part shapes and data API over GUI commands.
+- For fillets/chamfers: build the FINAL shape first (all booleans), THEN apply fillet/chamfer.
+  Never fillet a primitive before a boolean — edge indices change after fuse/cut.
+- Guard against empty edge lists before calling makeFillet/makeChamfer.
+- Keep fillet radius < half the smallest adjacent face dimension.
 """
 
 
