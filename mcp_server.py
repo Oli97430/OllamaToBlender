@@ -120,7 +120,7 @@ def send_code(app_key: str, code: str, timeout: float | None = None,
     """
     app = APPS[app_key]
     port = app["port"]
-    effective_timeout = timeout or app.get("timeout", 60.0)
+    effective_timeout = timeout if timeout is not None else app.get("timeout", 60.0)
     payload = json.dumps({"type": "execute", "code": code})
 
     last_error = ""
@@ -376,11 +376,14 @@ def _handle_tool_call(name: str, arguments: dict) -> tuple[list[dict], bool]:
     # ── ping_all (with versions) ──
     if name == "ping_all":
         lines = []
+        results_lock = threading.Lock()
         results = {}
 
         # Parallel ping for speed
         def _ping_thread(k):
-            results[k] = ping(k)
+            info = ping(k)
+            with results_lock:
+                results[k] = info
 
         threads = [threading.Thread(target=_ping_thread, args=(k,)) for k in APPS]
         for th in threads:
